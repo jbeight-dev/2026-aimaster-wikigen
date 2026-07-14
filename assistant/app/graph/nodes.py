@@ -6,7 +6,7 @@ from ..errors import AppError
 from ..models import WikiMd
 from .state import AssistantState
 
-NO_CONTEXT_TEXT = "관련된 승인 문서를 찾지 못했어요."
+NO_CONTEXT_TEXT = "질문에 관련된 문서를 찾지 못했어요."
 
 
 def retrieve_summary(state: AssistantState) -> dict:
