@@ -21,6 +21,10 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o")
 
 TOP_K_SUMMARY = int(os.getenv("TOP_K_SUMMARY", "5"))
 TOP_K_CHUNK = int(os.getenv("TOP_K_CHUNK", "8"))
-# 관련성 없는 검색 결과를 no_context로 보내기 위한 임계값. 실제 Qdrant 데이터의
-# 점수 분포를 보고 튜닝이 필요하다(assistant/readme.md 참고).
+# 관련성 없는 검색 결과를 no_context로 보내기 위한 1차(저비용) 임계값. 실제 Qdrant
+# 데이터의 점수 분포를 보고 튜닝이 필요하다(assistant/readme.md 참고).
 MIN_SCORE = float(os.getenv("MIN_SCORE", "0.2"))
+# 컨텍스트 구성 후 RAGAS 스타일 평가를 더한 2차(심층) 임계값. 미달 시 쿼리를
+# 재작성해 재검색한다.
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))

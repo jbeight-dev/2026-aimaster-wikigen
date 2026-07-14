@@ -51,10 +51,13 @@ def create_chat(
         {
             "space_id": body.space_id,
             "question": body.question,
+            "original_question": body.question,
             "history": [turn.model_dump() for turn in body.history],
             "allowed_doc_ids": list(doc_id_map.keys()),
             "doc_id_map": doc_id_map,
-        }
+            "retry_count": 0,
+        },
+        config={"recursion_limit": 50},
     )
 
     doc_scores = result.get("doc_scores", {})

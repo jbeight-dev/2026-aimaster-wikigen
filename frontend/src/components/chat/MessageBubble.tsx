@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../api/types';
+import { ChatMarkdown } from './ChatMarkdown';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -11,6 +12,7 @@ export function MessageBubble({ message, sourceTitles }: MessageBubbleProps) {
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
       <div style={{ maxWidth: '72%' }}>
         <div
+          className="chat-bubble-content"
           style={{
             padding: '10px 14px',
             borderRadius: 14,
@@ -20,7 +22,7 @@ export function MessageBubble({ message, sourceTitles }: MessageBubbleProps) {
             color: isUser ? '#0B0E13' : 'var(--text)',
           }}
         >
-          {message.text}
+          <ChatMarkdown text={message.text} isUser={isUser} />
         </div>
         {sourceTitles.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
@@ -41,6 +43,7 @@ export function MessageBubble({ message, sourceTitles }: MessageBubbleProps) {
           </div>
         )}
       </div>
+      <style>{`.chat-bubble-content > *:last-child { margin-bottom: 0; }`}</style>
     </div>
   );
 }

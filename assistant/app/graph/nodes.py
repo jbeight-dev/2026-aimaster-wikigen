@@ -41,14 +41,28 @@ def retrieve_chunk(state: AssistantState) -> dict:
     return {"chunk_hits": hits}
 
 
-def has_context(state: AssistantState) -> str:
+def _retry_or_give_up(state: AssistantState) -> str:
+    if state.get("retry_count", 0) < config.MAX_RETRIES:
+        return "query_rewriter"
+    return "no_context_answer"
+
+
+def route_after_hits(state: AssistantState) -> str:
+    """1차(저비용) 필터: 검색 히트 자체가 없거나 너무 낮으면 컨텍스트를 만들지 않는다."""
     best = [
         h["score"]
         for h in state.get("summary_hits", []) + state.get("chunk_hits", [])
     ]
     if best and max(best) >= config.MIN_SCORE:
         return "build_context"
-    return "no_context_answer"
+    return _retry_or_give_up(state)
+
+
+def route_after_confidence(state: AssistantState) -> str:
+    """2차(심층) 필터: RAGAS 스타일 confidence_score 기준으로 답변/재시도/포기를 결정."""
+    if state.get("confidence_score", 0.0) >= config.CONFIDENCE_THRESHOLD:
+        return "generate_answer"
+    return _retry_or_give_up(state)
 
 
 def no_context_answer(state: AssistantState) -> dict:
@@ -89,10 +103,61 @@ def make_build_context(db: Session):
     return build_context
 
 
+def confidence_checker(state: AssistantState) -> dict:
+    doc_scores = state.get("doc_scores", {})
+    similarity_score = max(0.0, min(1.0, max(doc_scores.values(), default=0.0)))
+
+    context = state.get("context", "")
+    if not context:
+        return {
+            "similarity_score": similarity_score,
+            "context_precision": 0.0,
+            "context_recall": 0.0,
+            "ragas_score": 0.0,
+            "confidence_score": 0.0,
+        }
+
+    try:
+        ragas = llm.evaluate_context(state["original_question"], context)
+    except Exception as e:
+        raise AppError(502, "LLM_API_ERROR", "LLM 호출에 실패했어요.") from e
+
+    ragas_score = (ragas["context_precision"] + ragas["context_recall"]) / 2
+    confidence_score = similarity_score * 0.4 + ragas_score * 0.6
+
+    print(
+        f"[assistant] confidence_score={confidence_score:.2f} "
+        f"(similarity={similarity_score:.2f}, ragas={ragas_score:.2f}) "
+        f"retry_count={state.get('retry_count', 0)} space_id={state['space_id']}"
+    )
+
+    return {
+        "similarity_score": similarity_score,
+        "context_precision": ragas["context_precision"],
+        "context_recall": ragas["context_recall"],
+        "ragas_score": ragas_score,
+        "confidence_score": confidence_score,
+    }
+
+
+def query_rewriter(state: AssistantState) -> dict:
+    try:
+        rewritten = llm.rewrite_query(state["original_question"], state["question"])
+    except Exception as e:
+        raise AppError(502, "LLM_API_ERROR", "LLM 호출에 실패했어요.") from e
+
+    retry_count = state.get("retry_count", 0) + 1
+    print(
+        f"[assistant] retry_count={retry_count} rewritten_query={rewritten!r} "
+        f"space_id={state['space_id']}"
+    )
+    return {"question": rewritten, "retry_count": retry_count}
+
+
 def generate_answer_node(state: AssistantState) -> dict:
     try:
         answer = llm.generate_answer(
-            state["context"], state["question"], state.get("history", [])
+            state["context"], state["original_question"], state.get("history", [])
         )
     except Exception as e:
         raise AppError(502, "LLM_API_ERROR", "LLM 호출에 실패했어요.") from e
