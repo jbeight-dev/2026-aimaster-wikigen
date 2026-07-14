@@ -74,7 +74,10 @@ export function ChatPanel({ messages, titleForDocument, isSending, onSend, disab
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSend();
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              handleSend();
+            }
           }}
           disabled={disabled}
           placeholder={disabled ? '승인된 문서가 있어야 질문할 수 있어요' : '질문을 입력하세요'}
