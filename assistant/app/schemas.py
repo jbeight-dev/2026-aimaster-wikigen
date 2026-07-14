@@ -8,6 +8,7 @@ class HistoryTurn(BaseModel):
 
 class ChatRequest(BaseModel):
     space_id: str
+    user_id: str
     question: str
     history: list[HistoryTurn] = []
 

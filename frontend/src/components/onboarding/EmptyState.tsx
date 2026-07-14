@@ -2,7 +2,7 @@ import { useAppState } from '../../state/AppState';
 import { fonts } from '../../theme/tokens';
 
 export function EmptyState() {
-  const { openCreateSpaceModal } = useAppState();
+  const { spaces, openCreateSpaceModal, viewExistingSpaces } = useAppState();
 
   return (
     <div
@@ -37,27 +37,44 @@ export function EmptyState() {
           maxWidth: 640,
         }}
       >
-        아직 만들어진 space가 없습니다
+        생성된 space가 없습니다.
       </h1>
       <p style={{ maxWidth: 480, opacity: 0.7, fontSize: 15, lineHeight: 1.6, margin: 0 }}>
-        문서를 업로드하면 AI가 자동으로 위키를 만들어줘요. 새 Space를 만들고 첫 문서를 등록해보세요.
+        문서를 업로드하면 AI가 내용을 분석해 자동으로 Wiki를 생성합니다.<br/> 새 Space를 만들고 첫 번째 문서를 등록해 보세요.
       </p>
-      <button
-        onClick={openCreateSpaceModal}
-        style={{
-          marginTop: 12,
-          padding: '13px 28px',
-          borderRadius: 999,
-          border: 'none',
-          background: '#FF8A3D',
-          color: '#0B0E13',
-          fontSize: 15,
-          fontWeight: 600,
-          animation: 'pulseRing 2.4s infinite',
-        }}
-      >
-        ＋ 새 Space 만들기
-      </button>
+      <div style={{ marginTop: 12, display: 'flex', gap: 12 }}>
+        <button
+          onClick={openCreateSpaceModal}
+          style={{
+            padding: '13px 28px',
+            borderRadius: 999,
+            border: 'none',
+            background: '#FF8A3D',
+            color: '#0B0E13',
+            fontSize: 15,
+            fontWeight: 600,
+            animation: 'pulseRing 2.4s infinite',
+          }}
+        >
+          ＋ 새 Space 만들기
+        </button>
+        {spaces.length > 0 && (
+          <button
+            onClick={viewExistingSpaces}
+            style={{
+              padding: '13px 28px',
+              borderRadius: 999,
+              border: '1px solid rgba(var(--ink-rgb), 0.24)',
+              background: 'transparent',
+              color: 'var(--text)',
+              fontSize: 15,
+              fontWeight: 600,
+            }}
+          >
+            기존 스페이스 조회
+          </button>
+        )}
+      </div>
       <style>{`
         @keyframes fadeUp { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
         @keyframes pulseRing {

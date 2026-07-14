@@ -34,10 +34,15 @@ def _get_space_or_404(db: Session, space_id: str) -> Space:
 
 
 async def _call_assistant_chat(
-    space_id: str, question: str, history: list[dict]
+    space_id: str, user_id: str, question: str, history: list[dict]
 ) -> dict:
     url = f"{ASSISTANT_API_BASE_URL}/assistant/v1/chat"
-    payload = {"space_id": space_id, "question": question, "history": history}
+    payload = {
+        "space_id": space_id,
+        "user_id": user_id,
+        "question": question,
+        "history": history,
+    }
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(url, json=payload)
@@ -91,7 +96,7 @@ async def create_chat_message(
         assistant_text = NO_APPROVED_DOCUMENTS_TEXT
         source_document_ids: list[str] = []
     else:
-        result = await _call_assistant_chat(space_id, body.text, history)
+        result = await _call_assistant_chat(space_id, current_user.user_id, body.text, history)
         assistant_text = result.get("answer", "")
         source_document_ids = [
             source["document_id"] for source in result.get("sources", [])

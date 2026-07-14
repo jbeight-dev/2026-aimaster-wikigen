@@ -40,7 +40,7 @@ def create_chat(
     if not body.space_id or not body.question:
         raise AppError(400, "INVALID_REQUEST", "space_id/question은 필수예요.")
 
-    print(f"[assistant] chat requested space_id={body.space_id}")
+    print(f"[assistant] chat requested space_id={body.space_id} user_id={body.user_id}")
 
     doc_id_map = _allowed_documents(db, body.space_id)
     if not doc_id_map:

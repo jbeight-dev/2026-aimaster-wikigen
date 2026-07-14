@@ -10,11 +10,11 @@ import { CreateSpaceModal } from './components/modals/CreateSpaceModal';
 
 function App() {
   const { theme, toggleTheme } = useTheme();
-  const { isLoading, spaces, activeReviewDocId, isCreateSpaceModalOpen } = useAppState();
+  const { isLoading, spaces, activeReviewDocId, isCreateSpaceModalOpen, hasVisitedLanding } = useAppState();
 
-  const isEmptyStage = !isLoading && spaces.length === 0;
+  const isEmptyStage = !isLoading && (spaces.length === 0 || !hasVisitedLanding);
   const isReviewStage = !isEmptyStage && activeReviewDocId !== null;
-  const isListStage = !isEmptyStage && !isReviewStage;
+  const isListStage = !isLoading && !isEmptyStage && !isReviewStage;
 
   return (
     <div style={{ position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>

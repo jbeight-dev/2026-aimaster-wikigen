@@ -21,6 +21,12 @@ function emptySpaceData(): SpaceData {
   return { files: [], documents: [], chatMessages: [] };
 }
 
+const LANDING_VISITED_KEY = 'wikigen.landingVisited';
+
+function getInitialLandingVisited(): boolean {
+  return localStorage.getItem(LANDING_VISITED_KEY) === 'true';
+}
+
 type ActionResult = { ok: true } | { ok: false; message: string };
 
 interface AppStateValue {
@@ -32,6 +38,9 @@ interface AppStateValue {
   spaces: Space[];
   activeSpaceId: string | null;
   selectSpace: (spaceId: string) => void;
+
+  hasVisitedLanding: boolean;
+  viewExistingSpaces: () => void;
 
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -83,6 +92,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [spaceData, setSpaceData] = useState<Record<string, SpaceData>>({});
+
+  const [hasVisitedLanding, setHasVisitedLanding] = useState<boolean>(getInitialLandingVisited);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isAccountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -199,8 +210,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const viewExistingSpaces = useCallback(() => {
+    localStorage.setItem(LANDING_VISITED_KEY, 'true');
+    setHasVisitedLanding(true);
+  }, []);
+
   const goToUploadAfterCreate = useCallback(() => {
     if (!createdSpace) return;
+    localStorage.setItem(LANDING_VISITED_KEY, 'true');
+    setHasVisitedLanding(true);
     setCreateSpaceModalOpen(false);
     selectSpace(createdSpace.space_id);
   }, [createdSpace, selectSpace]);
@@ -371,6 +389,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       spaces,
       activeSpaceId,
       selectSpace,
+      hasVisitedLanding,
+      viewExistingSpaces,
       sidebarCollapsed,
       toggleSidebar,
       isAccountMenuOpen,
@@ -410,6 +430,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       spaces,
       activeSpaceId,
       selectSpace,
+      hasVisitedLanding,
+      viewExistingSpaces,
       sidebarCollapsed,
       toggleSidebar,
       isAccountMenuOpen,

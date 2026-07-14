@@ -96,11 +96,15 @@ const components: Components = {
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(var(--ink-rgb), 0.12)', margin: '14px 0' }} />,
 };
 
+function stripHtmlComments(content: string): string {
+  return content.replace(/<!--[\s\S]*?-->/g, '');
+}
+
 export function MarkdownBody({ content }: { content: string }) {
   return (
     <div style={{ color: 'var(--text)' }}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
+        {stripHtmlComments(content)}
       </ReactMarkdown>
     </div>
   );
