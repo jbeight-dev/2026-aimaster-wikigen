@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../api/types';
 import { MessageBubble } from './MessageBubble';
 
@@ -12,6 +12,11 @@ interface ChatPanelProps {
 
 export function ChatPanel({ messages, titleForDocument, isSending, onSend, disabled }: ChatPanelProps) {
   const [draft, setDraft] = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [messages, isSending]);
 
   function handleSend() {
     if (!draft.trim() || disabled) return;
@@ -60,6 +65,7 @@ export function ChatPanel({ messages, titleForDocument, isSending, onSend, disab
             <span>위키를 참고해서 답변을 정리하고 있어요…</span>
           </div>
         )}
+        <div ref={bottomRef} />
       </div>
 
       <div

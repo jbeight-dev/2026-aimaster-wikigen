@@ -335,12 +335,31 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const sendChatMessage = useCallback(
     async (text: string) => {
       if (!activeSpaceId || !text.trim()) return;
+      const spaceId = activeSpaceId;
+      const trimmedText = text.trim();
+      const optimisticId = `pending-${Date.now()}`;
+      const optimisticMessage: ChatMessage = {
+        message_id: optimisticId,
+        space_id: spaceId,
+        role: 'user',
+        text: trimmedText,
+        source_document_ids: [],
+        created_at: new Date().toISOString(),
+      };
+      updateSpaceData(spaceId, (prev) => ({
+        chatMessages: [...prev.chatMessages, optimisticMessage],
+      }));
       setChatSending(true);
       try {
-        const { user_message, assistant_message } = await chatApi.sendMessage(activeSpaceId, text.trim());
-        updateSpaceData(activeSpaceId, (prev) => ({
-          chatMessages: [...prev.chatMessages, user_message, assistant_message],
+        const { user_message, assistant_message } = await chatApi.sendMessage(spaceId, trimmedText);
+        updateSpaceData(spaceId, (prev) => ({
+          chatMessages: [...prev.chatMessages.filter((m) => m.message_id !== optimisticId), user_message, assistant_message],
         }));
+      } catch (err) {
+        updateSpaceData(spaceId, (prev) => ({
+          chatMessages: prev.chatMessages.filter((m) => m.message_id !== optimisticId),
+        }));
+        throw err;
       } finally {
         setChatSending(false);
       }
