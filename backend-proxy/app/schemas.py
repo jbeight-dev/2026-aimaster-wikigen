@@ -151,6 +151,10 @@ class DocumentRejectRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class DocumentUpdateRequest(BaseModel):
+    sections: list[DocumentSection]
+
+
 # ---- Wiki ----
 
 

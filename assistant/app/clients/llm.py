@@ -22,8 +22,17 @@ def embed_text(text: str) -> list[float]:
     return response.data[0].embedding
 
 
-def generate_answer(context: str, question: str, history: list[dict]) -> str:
+def generate_answer(
+    context: str, question: str, history: list[dict], conversation_summary: str = ""
+) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if conversation_summary:
+        messages.append(
+            {
+                "role": "system",
+                "content": f"이전 대화 요약:\n{conversation_summary}",
+            }
+        )
     for turn in history:
         role = "assistant" if turn["role"] == "assistant" else "user"
         messages.append({"role": role, "content": turn["text"]})
@@ -39,6 +48,29 @@ def generate_answer(context: str, question: str, history: list[dict]) -> str:
         messages=messages,
     )
     return response.choices[0].message.content
+
+
+def summarize_history(history: list[dict]) -> str:
+    """오래된 대화 턴들을 답변 생성에 참고할 핵심 요약으로 압축한다."""
+    if not history:
+        return ""
+
+    transcript = "\n".join(
+        f"{'assistant' if turn['role'] == 'assistant' else 'user'}: {turn['text']}"
+        for turn in history
+    )
+    prompt = (
+        "너는 대화 요약기다. 아래는 사용자와 어시스턴트 사이의 이전 대화 기록이다. "
+        "이후 답변 생성에 참고할 수 있도록 핵심 주제, 사용자의 의도, 이미 확인된 정보를 "
+        "중심으로 간결하게 요약하라. 불필요한 인사말이나 잡담은 생략한다.\n\n"
+        f"대화 기록:\n{transcript}\n\n요약:"
+    )
+
+    response = _client.chat.completions.create(
+        model=config.CHAT_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content.strip()
 
 
 def evaluate_context(question: str, context: str) -> dict:

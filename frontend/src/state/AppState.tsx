@@ -6,7 +6,7 @@ import * as filesApi from '../api/files';
 import * as documentsApi from '../api/documents';
 import * as chatApi from '../api/chat';
 import { ApiError, setToken } from '../api/client';
-import type { ChatMessage, Space, User, UploadedFile, WikiDocument } from '../api/types';
+import type { ChatMessage, DocumentSection, Space, User, UploadedFile, WikiDocument } from '../api/types';
 import { useAnalysisPolling } from './useAnalysisPolling';
 
 export type TabId = 'upload' | 'wiki' | 'chat';
@@ -74,6 +74,7 @@ interface AppStateValue {
   approveDocument: (documentId: string) => Promise<void>;
   rejectDocument: (documentId: string, reason: string) => Promise<void>;
   reopenDocument: (documentId: string) => Promise<void>;
+  updateDocumentContent: (documentId: string, sections: DocumentSection[]) => Promise<void>;
 
   loadChatMessages: (spaceId: string) => Promise<void>;
   sendChatMessage: (text: string) => Promise<void>;
@@ -324,6 +325,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [activeSpaceId, updateSpaceData, refreshSpaceCounts],
   );
 
+  const updateDocumentContent = useCallback(
+    async (documentId: string, sections: DocumentSection[]) => {
+      if (!activeSpaceId) return;
+      const { document } = await documentsApi.updateDocument(documentId, sections);
+      updateSpaceData(activeSpaceId, (prev) => ({
+        documents: prev.documents.map((d) => (d.document_id === documentId ? document : d)),
+      }));
+    },
+    [activeSpaceId, updateSpaceData],
+  );
+
   const loadChatMessages = useCallback(
     async (spaceId: string) => {
       const { items } = await chatApi.listMessages(spaceId);
@@ -436,6 +448,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       approveDocument,
       rejectDocument,
       reopenDocument,
+      updateDocumentContent,
       loadChatMessages,
       sendChatMessage,
       isChatSending,
@@ -475,6 +488,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       approveDocument,
       rejectDocument,
       reopenDocument,
+      updateDocumentContent,
       loadChatMessages,
       sendChatMessage,
       isChatSending,

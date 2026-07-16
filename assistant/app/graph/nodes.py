@@ -155,9 +155,20 @@ def query_rewriter(state: AssistantState) -> dict:
 
 
 def generate_answer_node(state: AssistantState) -> dict:
+    history = state.get("history", [])
+    recent_turns = config.RECENT_HISTORY_TURNS
+    recent_history = history[-recent_turns:] if recent_turns else history
+    older_history = history[: len(history) - len(recent_history)]
+
     try:
+        conversation_summary = (
+            llm.summarize_history(older_history) if older_history else ""
+        )
         answer = llm.generate_answer(
-            state["context"], state["original_question"], state.get("history", [])
+            state["context"],
+            state["original_question"],
+            recent_history,
+            conversation_summary,
         )
     except Exception as e:
         raise AppError(502, "LLM_API_ERROR", "LLM 호출에 실패했어요.") from e

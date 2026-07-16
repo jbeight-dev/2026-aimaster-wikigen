@@ -24,3 +24,5 @@ MIN_SCORE = float(os.getenv("MIN_SCORE", "0.2"))
 # 재작성해 재검색한다.
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
+# 답변 생성 시 원문 그대로 사용할 최근 대화 턴 수. 이보다 이전 턴은 요약해서 사용한다.
+RECENT_HISTORY_TURNS = int(os.getenv("RECENT_HISTORY_TURNS", "4"))

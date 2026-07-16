@@ -11,7 +11,13 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..errors import AppError
 from ..models import Document, Space, User
-from ..schemas import DocumentRejectRequest, DocumentListResponse, DocumentResponse, DocumentSchema
+from ..schemas import (
+    DocumentRejectRequest,
+    DocumentListResponse,
+    DocumentResponse,
+    DocumentSchema,
+    DocumentUpdateRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,26 @@ def get_document(
     current_user: User = Depends(get_current_user),
 ):
     document = _get_document_or_404(db, document_id)
+    return DocumentResponse(document=DocumentSchema.model_validate(document))
+
+
+@router.patch("/documents/{document_id}", response_model=DocumentResponse)
+def update_document(
+    document_id: str,
+    body: DocumentUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = _get_document_or_404(db, document_id)
+    if document.status not in ("pending", "rejected"):
+        raise AppError(400, "DOCUMENT_NOT_EDITABLE", "검토 대기 또는 반려 상태에서만 내용을 수정할 수 있어요.")
+
+    document.sections = [section.model_dump(exclude_none=True) for section in body.sections]
+    document.history = document.history + [
+        {"label": "내용이 수정됨", "time": _now_iso()}
+    ]
+    db.commit()
+    db.refresh(document)
     return DocumentResponse(document=DocumentSchema.model_validate(document))
 
 

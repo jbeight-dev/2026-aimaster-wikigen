@@ -20,3 +20,6 @@ backend-proxy/storage/uploads/
 # Frontend (frontend/.gitignore가 이미 커버하지만 안전망)
 node_modules/
 dist/
+
+
+collection-txt/

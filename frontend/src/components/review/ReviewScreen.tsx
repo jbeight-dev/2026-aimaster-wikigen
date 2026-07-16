@@ -1,4 +1,5 @@
-import type { WikiDocument } from '../../api/types';
+import { useEffect, useState } from 'react';
+import type { DocumentSection, WikiDocument } from '../../api/types';
 import { useAppState } from '../../state/AppState';
 import { fonts } from '../../theme/tokens';
 import { documentStatusStyle } from '../../utils/statusStyle';
@@ -18,7 +19,20 @@ export function ReviewScreen() {
     approveDocument,
     rejectDocument,
     reopenDocument,
+    updateDocumentContent,
   } = useAppState();
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftSections, setDraftSections] = useState<DocumentSection[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    setIsEditing(false);
+    setRejecting(false);
+    setReason('');
+  }, [activeReviewDocument?.document_id]);
 
   if (!activeReviewDocument) return null;
 
@@ -28,6 +42,61 @@ export function ReviewScreen() {
   const relatedDocs = doc.related_document_ids
     .map((id) => activeSpaceData.documents.find((d) => d.document_id === id))
     .filter((d): d is WikiDocument => d !== undefined);
+
+  const canEdit = doc.status === 'pending' || doc.status === 'rejected';
+
+  function startEditing() {
+    setDraftSections(doc.sections.map((s) => ({ ...s })));
+    setIsEditing(true);
+  }
+
+  function cancelEditing() {
+    setIsEditing(false);
+  }
+
+  async function saveEditing() {
+    setIsSaving(true);
+    try {
+      await updateDocumentContent(doc.document_id, draftSections);
+      setIsEditing(false);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function startReject() {
+    setRejecting(true);
+  }
+
+  function cancelReject() {
+    setRejecting(false);
+    setReason('');
+  }
+
+  function confirmReject() {
+    rejectDocument(doc.document_id, reason);
+    setRejecting(false);
+    setReason('');
+  }
+
+  const actionBarProps = {
+    status: doc.status,
+    canEdit,
+    isEditing,
+    isSaving,
+    isRejecting,
+    reason,
+    onReasonChange: setReason,
+    onStartReject: startReject,
+    onCancelReject: cancelReject,
+    onApprove: () => approveDocument(doc.document_id),
+    onConfirmReject: confirmReject,
+    onReopen: () => reopenDocument(doc.document_id),
+    onClose: closeReview,
+    onStartEdit: startEditing,
+    onCancelEdit: cancelEditing,
+    onSaveEdit: saveEditing,
+  };
 
   return (
     <main
@@ -56,13 +125,23 @@ export function ReviewScreen() {
         >
           {badge.label}
         </span>
+        {isEditing && (
+          <span style={{ fontSize: 11.5, opacity: 0.5, fontFamily: fonts.mono }}>수정 중</span>
+        )}
       </div>
+
+      <ReviewActionBar position="top" {...actionBarProps} />
 
       <div style={{ marginTop: 24 }}>
         <FlagBanner flags={doc.flags} />
 
-        {doc.sections.map((section, i) => (
-          <SectionRenderer key={i} section={section} />
+        {(isEditing ? draftSections : doc.sections).map((section, i) => (
+          <SectionRenderer
+            key={i}
+            section={section}
+            isEditing={isEditing}
+            onChange={(next) => setDraftSections((prev) => prev.map((s, idx) => (idx === i ? next : s)))}
+          />
         ))}
 
         <RelatedDocuments relatedDocs={relatedDocs} onSelect={(id) => openReview(id)} />
@@ -85,13 +164,7 @@ export function ReviewScreen() {
         <HistoryTimeline history={doc.history} />
       </div>
 
-      <ReviewActionBar
-        status={doc.status}
-        onApprove={() => approveDocument(doc.document_id)}
-        onReject={(reason) => rejectDocument(doc.document_id, reason)}
-        onReopen={() => reopenDocument(doc.document_id)}
-        onClose={closeReview}
-      />
+      <ReviewActionBar position="bottom" {...actionBarProps} />
     </main>
   );
 }

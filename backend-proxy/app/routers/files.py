@@ -1,4 +1,4 @@
-import asyncio
+import json
 import logging
 import mimetypes
 import os
@@ -34,17 +34,18 @@ BUILDER_INGEST_URL = f"{BUILDER_API_BASE_URL}/builderapi/v1/ingest"
 
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "storage" / "uploads"
 
-ANALYSIS_STEPS = [
-    "파일을 읽는 중이에요",
-    "핵심 내용을 추출하는 중이에요",
-    "내용을 요약하는 중이에요",
-    "핵심 내용과 키워드를 뽑아내는 중이에요",
-    "연관 문서를 탐색하는 중이에요",
-    "내용을 검증하는 중이에요",
-    "마무리하는 중이에요",
-]
+BUILDER_STEP_MESSAGES = {
+    "intake": "파일을 읽는 중이에요",
+    "extract": "핵심 내용을 추출하는 중이에요",
+    "structure": "내용을 구조화하는 중이에요",
+    "translate": "번역하는 중이에요",
+    "enrich": "핵심 키워드와 관계를 추출하는 중이에요",
+    "metadata": "메타데이터를 정리하는 중이에요",
+    "relations": "연관 문서를 탐색하는 중이에요",
+    "verify": "내용을 검증하는 중이에요",
+    "draft": "마무리하는 중이에요",
+}
 
-STEP_DELAY_SECONDS = 0.7
 FAILURE_RATE = 0.15
 
 
@@ -164,6 +165,34 @@ async def _fetch_and_persist_wikimd_docs(file: File, doc_ids: list[str]) -> None
         db.close()
 
 
+def _update_analysis_step(file_id: str, *, index: int | None = None, message: str | None = None) -> None:
+    db = SessionLocal()
+    try:
+        file = db.get(File, file_id)
+        if not file or file.status != "analyzing":
+            return
+        if index is not None:
+            file.step_index = index
+        if message is not None:
+            file.step_message = message
+        db.commit()
+    finally:
+        db.close()
+
+
+async def _iter_sse_events(response: httpx.Response):
+    async for line in response.aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if not payload:
+            continue
+        try:
+            yield json.loads(payload)
+        except ValueError:
+            logger.exception("failed to parse builder SSE payload: %s", payload)
+
+
 async def _call_builder_ingest(file: File) -> None:
     path = _file_storage_path(file.file_id, file.name)
     if not path.exists():
@@ -171,38 +200,58 @@ async def _call_builder_ingest(file: File) -> None:
         return
 
     content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+    ext = _file_extension(file.name)
+    ingest_filename = f"{file.file_id}.{ext}" if ext else file.file_id
     logger.info(
-        "calling builder ingest for file %s (name=%s, content_type=%s) at %s",
+        "calling builder ingest for file %s (name=%s, ingest_filename=%s, content_type=%s) at %s",
         file.file_id,
         file.name,
+        ingest_filename,
         content_type,
         BUILDER_INGEST_URL,
     )
+
+    doc_ids: list[str] = []
+    error_detail: str | None = None
+    finished_steps = 0
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             with path.open("rb") as fh:
-                response = await client.post(
+                async with client.stream(
+                    "POST",
                     BUILDER_INGEST_URL,
                     data={"file_id": file.file_id, "space_id": file.space_id},
-                    files={"file": (file.name, fh, content_type)},
-                )
-        response.raise_for_status()
+                    files={"file": (ingest_filename, fh, content_type)},
+                ) as response:
+                    response.raise_for_status()
+                    async for event in _iter_sse_events(response):
+                        event_type = event.get("event")
+                        if event_type == "start":
+                            step = event.get("step", "")
+                            logger.info("file %s builder step started: %s (%s)", file.file_id, step, event.get("detail"))
+                            _update_analysis_step(file.file_id, message=BUILDER_STEP_MESSAGES.get(step, step))
+                        elif event_type == "finish":
+                            finished_steps += 1
+                            logger.info(
+                                "file %s builder step finished: %s (%ss)",
+                                file.file_id,
+                                event.get("step"),
+                                event.get("elapsed"),
+                            )
+                            _update_analysis_step(file.file_id, index=finished_steps)
+                        elif event_type == "result":
+                            doc_ids = event.get("doc_ids", [])
+                        elif event_type == "error":
+                            error_detail = event.get("detail", "")
     except httpx.HTTPError:
         logger.exception("builder ingest call failed for file %s", file.file_id)
         return
 
-    try:
-        doc_ids = response.json().get("doc_ids", [])
-    except ValueError:
-        logger.exception("builder ingest response was not valid JSON for file %s", file.file_id)
+    if error_detail is not None:
+        logger.error("builder ingest reported failure for file %s: %s", file.file_id, error_detail)
         return
 
-    logger.info(
-        "builder ingest succeeded for file %s: status=%s doc_ids=%s",
-        file.file_id,
-        response.status_code,
-        doc_ids,
-    )
+    logger.info("builder ingest succeeded for file %s: doc_ids=%s", file.file_id, doc_ids)
     await _fetch_and_persist_wikimd_docs(file, doc_ids)
 
 
@@ -233,33 +282,6 @@ def _build_document_from_wiki(file: File, entry: WikiMd) -> Document:
         related_document_ids=[],
         history=[{"label": "문서 생성됨 (분석 완료)", "time": _now_iso()}],
     )
-
-
-async def _run_analysis_progress(file_id: str) -> None:
-    logger.info("analysis progress started for file %s (%d steps)", file_id, len(ANALYSIS_STEPS))
-    for index, message in enumerate(ANALYSIS_STEPS):
-        await asyncio.sleep(STEP_DELAY_SECONDS)
-        db = SessionLocal()
-        try:
-            file = db.get(File, file_id)
-            if not file or file.status != "analyzing":
-                logger.info(
-                    "analysis progress aborted for file %s at step %d/%d (status=%s)",
-                    file_id,
-                    index + 1,
-                    len(ANALYSIS_STEPS),
-                    file.status if file else "missing",
-                )
-                return
-            file.step_index = index
-            file.step_message = message
-            db.commit()
-            logger.info(
-                "file %s step %d/%d: %s", file_id, index + 1, len(ANALYSIS_STEPS), message
-            )
-        finally:
-            db.close()
-    logger.info("analysis progress finished for file %s", file_id)
 
 
 def _finalize_analysis(file_id: str) -> None:
@@ -407,9 +429,8 @@ async def analyze_file(
     logger.info("starting analysis for file %s '%s'", file.file_id, file.name)
     file.status = "analyzing"
     file.step_index = 0
-    file.step_message = ANALYSIS_STEPS[0]
+    file.step_message = BUILDER_STEP_MESSAGES["intake"]
     db.commit()
-    await _run_analysis_progress(file.file_id)
     await _call_builder_ingest(file)
     _finalize_analysis(file.file_id)
     db.refresh(file)
@@ -431,9 +452,8 @@ async def retry_file(
     logger.info("retrying analysis for file %s '%s'", file.file_id, file.name)
     file.status = "analyzing"
     file.step_index = 0
-    file.step_message = ANALYSIS_STEPS[0]
+    file.step_message = BUILDER_STEP_MESSAGES["intake"]
     db.commit()
-    await _run_analysis_progress(file.file_id)
     await _call_builder_ingest(file)
     _finalize_analysis(file.file_id)
     db.refresh(file)

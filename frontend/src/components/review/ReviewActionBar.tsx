@@ -1,37 +1,91 @@
-import { useState } from 'react';
 import type { DocumentStatus } from '../../api/types';
 import { useHover } from '../../utils/useHover';
 
 interface ReviewActionBarProps {
   status: DocumentStatus;
+  position?: 'top' | 'bottom';
+  canEdit: boolean;
+  isEditing: boolean;
+  isSaving: boolean;
+  isRejecting: boolean;
+  reason: string;
+  onReasonChange: (reason: string) => void;
+  onStartReject: () => void;
+  onCancelReject: () => void;
   onApprove: () => void;
-  onReject: (reason: string) => void;
+  onConfirmReject: () => void;
   onReopen: () => void;
   onClose: () => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
 }
 
-export function ReviewActionBar({ status, onApprove, onReject, onReopen, onClose }: ReviewActionBarProps) {
-  const [isRejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState('');
+export function ReviewActionBar({
+  status,
+  position = 'bottom',
+  canEdit,
+  isEditing,
+  isSaving,
+  isRejecting,
+  reason,
+  onReasonChange,
+  onStartReject,
+  onCancelReject,
+  onApprove,
+  onConfirmReject,
+  onReopen,
+  onClose,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+}: ReviewActionBarProps) {
+  const containerStyle =
+    position === 'bottom'
+      ? {
+          position: 'sticky' as const,
+          bottom: 0,
+          marginTop: 32,
+          padding: '16px 4px',
+          borderTop: '1px solid rgba(var(--ink-rgb), 0.1)',
+          background: 'color-mix(in srgb, var(--bg) 85%, transparent)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }
+      : {
+          marginBottom: 20,
+          padding: '0 0 16px',
+          borderBottom: '1px solid rgba(var(--ink-rgb), 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        };
+
+  if (isEditing) {
+    return (
+      <div style={containerStyle}>
+        <ActionButton variant="ghost" onClick={onCancelEdit}>
+          취소
+        </ActionButton>
+        <ActionButton variant="primary" onClick={onSaveEdit}>
+          {isSaving ? '저장 중…' : '수정 저장'}
+        </ActionButton>
+      </div>
+    );
+  }
 
   return (
-    <div
-      style={{
-        position: 'sticky',
-        bottom: 0,
-        marginTop: 32,
-        padding: '16px 4px',
-        borderTop: '1px solid rgba(var(--ink-rgb), 0.1)',
-        background: 'color-mix(in srgb, var(--bg) 85%, transparent)',
-        backdropFilter: 'blur(10px)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-      }}
-    >
+    <div style={containerStyle}>
       {status === 'pending' && !isRejecting && (
         <>
-          <ActionButton variant="ghost" onClick={() => setRejecting(true)}>
+          {canEdit && (
+            <ActionButton variant="ghost" onClick={onStartEdit}>
+              수정
+            </ActionButton>
+          )}
+          <ActionButton variant="ghost" onClick={onStartReject}>
             반려
           </ActionButton>
           <ActionButton variant="primary" onClick={onApprove}>
@@ -45,7 +99,7 @@ export function ReviewActionBar({ status, onApprove, onReject, onReopen, onClose
           <input
             autoFocus
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            onChange={(e) => onReasonChange(e.target.value)}
             placeholder="반려 사유를 입력하세요 (미입력 시 '사유 미입력'으로 기록돼요)"
             style={{
               flex: 1,
@@ -57,23 +111,10 @@ export function ReviewActionBar({ status, onApprove, onReject, onReopen, onClose
               fontSize: 13,
             }}
           />
-          <ActionButton
-            variant="ghost"
-            onClick={() => {
-              setRejecting(false);
-              setReason('');
-            }}
-          >
+          <ActionButton variant="ghost" onClick={onCancelReject}>
             취소
           </ActionButton>
-          <ActionButton
-            variant="danger"
-            onClick={() => {
-              onReject(reason);
-              setRejecting(false);
-              setReason('');
-            }}
-          >
+          <ActionButton variant="danger" onClick={onConfirmReject}>
             반려 확정
           </ActionButton>
         </div>
@@ -92,6 +133,11 @@ export function ReviewActionBar({ status, onApprove, onReject, onReopen, onClose
 
       {status === 'rejected' && (
         <>
+          {canEdit && (
+            <ActionButton variant="ghost" onClick={onStartEdit}>
+              수정
+            </ActionButton>
+          )}
           <ActionButton variant="primary" onClick={onReopen}>
             다시 검토 대기로
           </ActionButton>

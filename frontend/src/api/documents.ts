@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { DocumentStatus, WikiDocument } from './types';
+import type { DocumentSection, DocumentStatus, WikiDocument } from './types';
 
 export function getDocument(documentId: string): Promise<{ document: WikiDocument }> {
   return apiClient.get(`/documents/${documentId}`);
@@ -25,4 +25,11 @@ export function rejectDocument(
 
 export function reopenDocument(documentId: string): Promise<{ document: WikiDocument }> {
   return apiClient.post(`/documents/${documentId}/reopen`);
+}
+
+export function updateDocument(
+  documentId: string,
+  sections: DocumentSection[],
+): Promise<{ document: WikiDocument }> {
+  return apiClient.patch(`/documents/${documentId}`, { sections });
 }
