@@ -1,12 +1,26 @@
-from sqlalchemy import create_engine
+import os
+
+from dotenv import load_dotenv
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from .config import DATABASE_URL
+load_dotenv()
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+DATABASE_URL = os.environ["DATABASE_URL"]
 
-Base = declarative_base()
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+)
+
+metadata = MetaData(schema="wikidb")
+Base = declarative_base(metadata=metadata)
+
+SessionLocal = sessionmaker(
+    bind=engine,
+    autocommit=False,
+    autoflush=False,
+)
 
 
 def get_db():

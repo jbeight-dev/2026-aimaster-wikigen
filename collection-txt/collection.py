@@ -1,12 +1,25 @@
+from pathlib import Path
+from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
 
 
-URL = "https://docs.starrocks.io/docs/using_starrocks/SQL_plan_manager/"
-OUTPUT_FILE = "SQL_plan_manager.txt"
+SCRIPT_DIR = Path(__file__).resolve().parent
+URL_LIST_FILE = SCRIPT_DIR / "url.txt"
 
 
-def save_page_to_text(url: str, output_file: str) -> None:
+def read_urls(url_list_file: Path) -> list[str]:
+    with open(url_list_file, "r", encoding="utf-8") as file:
+        return [line.strip() for line in file if line.strip()]
+
+
+def url_to_output_file(url: str) -> Path:
+    slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    return SCRIPT_DIR / f"{slug}.txt"
+
+
+def save_page_to_text(url: str, output_file: Path) -> None:
     response = requests.get(url, timeout=30)
     response.raise_for_status()
 
@@ -45,4 +58,6 @@ BODY
 
 
 if __name__ == "__main__":
-    save_page_to_text(URL, OUTPUT_FILE)
+    urls = read_urls(URL_LIST_FILE)
+    for url in urls:
+        save_page_to_text(url, url_to_output_file(url))

@@ -77,12 +77,18 @@ def _parse_builder_dt(value: str | None) -> datetime | None:
 
 async def _fetch_builder_document(client: httpx.AsyncClient, doc_id: str) -> dict | None:
     url = f"{BUILDER_API_BASE_URL}/builderapi/v1/documents/{doc_id}"
+    logger.debug("fetching builder document doc_id=%s url=%s", doc_id, url)
     try:
         response = await client.get(url)
         response.raise_for_status()
+        logger.info("fetched builder document doc_id=%s status=%s", doc_id, response.status_code)
         return response.json()
-    except httpx.HTTPStatusError:
-        logger.warning("builder document fetch returned error status for doc_id %s", doc_id)
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "builder document fetch returned error status for doc_id %s: %s",
+            doc_id,
+            exc.response.status_code,
+        )
         return None
     except httpx.HTTPError:
         logger.exception("builder document fetch failed for doc_id %s", doc_id)
@@ -92,9 +98,17 @@ async def _fetch_builder_document(client: httpx.AsyncClient, doc_id: str) -> dic
 def _upsert_wikimd(db: Session, file: File, doc_id: str, payload: dict) -> None:
     document = payload["document"]
     row = db.get(WikiMd, doc_id)
+    is_new = row is None
     if row is None:
         row = WikiMd(doc_id=doc_id)
         db.add(row)
+    logger.info(
+        "%s wikimd row doc_id=%s file_id=%s title=%s",
+        "creating" if is_new else "updating",
+        doc_id,
+        file.file_id,
+        document.get("title"),
+    )
     row.file_id = file.file_id
     row.space_id = file.space_id
     row.title = document["title"]
@@ -117,8 +131,10 @@ def _upsert_wikimd(db: Session, file: File, doc_id: str, payload: dict) -> None:
 
 async def _fetch_and_persist_wikimd_docs(file: File, doc_ids: list[str]) -> None:
     if not doc_ids:
+        logger.info("no doc_ids to fetch for file %s", file.file_id)
         return
 
+    logger.info("fetching %d builder document(s) for file %s", len(doc_ids), file.file_id)
     fetched: list[tuple[str, dict]] = []
     async with httpx.AsyncClient(timeout=30.0) as client:
         for doc_id in doc_ids:
@@ -126,6 +142,12 @@ async def _fetch_and_persist_wikimd_docs(file: File, doc_ids: list[str]) -> None
             if payload is not None:
                 fetched.append((doc_id, payload))
 
+    logger.info(
+        "fetched %d/%d builder document(s) successfully for file %s",
+        len(fetched),
+        len(doc_ids),
+        file.file_id,
+    )
     if not fetched:
         return
 
@@ -149,6 +171,13 @@ async def _call_builder_ingest(file: File) -> None:
         return
 
     content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+    logger.info(
+        "calling builder ingest for file %s (name=%s, content_type=%s) at %s",
+        file.file_id,
+        file.name,
+        content_type,
+        BUILDER_INGEST_URL,
+    )
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             with path.open("rb") as fh:
@@ -168,6 +197,12 @@ async def _call_builder_ingest(file: File) -> None:
         logger.exception("builder ingest response was not valid JSON for file %s", file.file_id)
         return
 
+    logger.info(
+        "builder ingest succeeded for file %s: status=%s doc_ids=%s",
+        file.file_id,
+        response.status_code,
+        doc_ids,
+    )
     await _fetch_and_persist_wikimd_docs(file, doc_ids)
 
 
@@ -201,18 +236,30 @@ def _build_document_from_wiki(file: File, entry: WikiMd) -> Document:
 
 
 async def _run_analysis_progress(file_id: str) -> None:
+    logger.info("analysis progress started for file %s (%d steps)", file_id, len(ANALYSIS_STEPS))
     for index, message in enumerate(ANALYSIS_STEPS):
         await asyncio.sleep(STEP_DELAY_SECONDS)
         db = SessionLocal()
         try:
             file = db.get(File, file_id)
             if not file or file.status != "analyzing":
+                logger.info(
+                    "analysis progress aborted for file %s at step %d/%d (status=%s)",
+                    file_id,
+                    index + 1,
+                    len(ANALYSIS_STEPS),
+                    file.status if file else "missing",
+                )
                 return
             file.step_index = index
             file.step_message = message
             db.commit()
+            logger.info(
+                "file %s step %d/%d: %s", file_id, index + 1, len(ANALYSIS_STEPS), message
+            )
         finally:
             db.close()
+    logger.info("analysis progress finished for file %s", file_id)
 
 
 def _finalize_analysis(file_id: str) -> None:
@@ -220,15 +267,22 @@ def _finalize_analysis(file_id: str) -> None:
     try:
         file = db.get(File, file_id)
         if not file or file.status != "analyzing":
+            logger.info(
+                "finalize skipped for file %s (status=%s)",
+                file_id,
+                file.status if file else "missing",
+            )
             return
 
         if random.random() < FAILURE_RATE:
+            logger.info("analysis randomly failed for file %s (FAILURE_RATE=%s)", file_id, FAILURE_RATE)
             file.status = "analysis_failed"
             db.commit()
             return
 
         wiki_entries = db.query(WikiMd).filter(WikiMd.file_id == file.file_id).all()
         if not wiki_entries:
+            logger.warning("analysis failed for file %s: no wikimd entries were persisted", file_id)
             file.status = "analysis_failed"
             db.commit()
             return
@@ -248,6 +302,9 @@ def _finalize_analysis(file_id: str) -> None:
 
         file.status = "done"
         db.commit()
+        logger.info(
+            "analysis completed for file %s: created %d document(s)", file_id, len(documents)
+        )
     finally:
         db.close()
 
@@ -265,6 +322,7 @@ async def upload_files(
 
     form = await request.form()
     uploads = form.getlist("files[]") or form.getlist("files")
+    logger.info("received %d upload(s) for space %s", len(uploads), space_id)
 
     created: list[File] = []
     for upload in uploads:
@@ -285,6 +343,20 @@ async def upload_files(
             path = _file_storage_path(file.file_id, file.name)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(contents)
+            logger.info(
+                "saved file %s '%s' (%d bytes) to %s",
+                file.file_id,
+                file.name,
+                file.size_bytes,
+                path,
+            )
+        else:
+            logger.warning(
+                "rejected upload '%s' for space %s: unsupported extension '%s'",
+                upload.filename,
+                space_id,
+                ext,
+            )
 
     db.commit()
     for file in created:
@@ -332,6 +404,7 @@ async def analyze_file(
     if file.status != "idle":
         raise AppError(400, "FILE_NOT_ANALYZABLE", "분석을 시작할 수 없는 상태입니다.")
 
+    logger.info("starting analysis for file %s '%s'", file.file_id, file.name)
     file.status = "analyzing"
     file.step_index = 0
     file.step_message = ANALYSIS_STEPS[0]
@@ -340,6 +413,7 @@ async def analyze_file(
     await _call_builder_ingest(file)
     _finalize_analysis(file.file_id)
     db.refresh(file)
+    logger.info("analysis request finished for file %s: status=%s", file.file_id, file.status)
 
     return FileAnalyzeResponse(file_id=file.file_id, status=file.status)
 
@@ -354,6 +428,7 @@ async def retry_file(
     if file.status != "analysis_failed":
         raise AppError(400, "FILE_NOT_ANALYZABLE", "재분석할 수 없는 상태입니다.")
 
+    logger.info("retrying analysis for file %s '%s'", file.file_id, file.name)
     file.status = "analyzing"
     file.step_index = 0
     file.step_message = ANALYSIS_STEPS[0]
@@ -362,6 +437,7 @@ async def retry_file(
     await _call_builder_ingest(file)
     _finalize_analysis(file.file_id)
     db.refresh(file)
+    logger.info("retry finished for file %s: status=%s", file.file_id, file.status)
 
     return FileAnalyzeResponse(file_id=file.file_id, status=file.status)
 
@@ -385,10 +461,18 @@ def delete_file(
 ):
     file = _get_file_or_404(db, file_id)
     file.status = "deleted"
-    db.query(Document).filter(Document.file_id == file.file_id).update(
-        {"status": "deleted"}, synchronize_session=False
+    updated = (
+        db.query(Document)
+        .filter(Document.file_id == file.file_id)
+        .update({"status": "deleted"}, synchronize_session=False)
     )
     db.commit()
+    logger.info(
+        "deleted file %s '%s' (%d associated document(s) marked deleted)",
+        file.file_id,
+        file.name,
+        updated,
+    )
 
 
 @router.get("/files/{file_id}/stream")

@@ -1,3 +1,5 @@
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -8,6 +10,11 @@ from .database import Base, SessionLocal, engine
 from .errors import AppError
 from .models import SEED_USERS, User
 from .routers import auth, chat, documents, files, spaces
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+)
 
 
 def seed_users() -> None:

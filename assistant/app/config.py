@@ -4,10 +4,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/wikigen"
-)
-
 QDRANT_URL = os.getenv("QDRANT_URL", "")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_SUMMARY_COLLECTION = os.getenv("QDRANT_SUMMARY_COLLECTION", "wiki_summary")
