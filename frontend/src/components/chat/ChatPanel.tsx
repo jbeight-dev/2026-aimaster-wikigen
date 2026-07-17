@@ -62,7 +62,7 @@ export function ChatPanel({ messages, titleForDocument, isSending, onSend, disab
                 display: 'inline-block',
               }}
             />
-            <span>위키를 참고해서 답변을 정리하고 있어요…</span>
+            <span>위키를 참고하여 답변을 작성하고 있어요… </span>
           </div>
         )}
         <div ref={bottomRef} />
