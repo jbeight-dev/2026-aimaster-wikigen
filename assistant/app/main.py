@@ -4,9 +4,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from . import config
 from .errors import AppError
+from .observability import configure_logging
 from .routers import chat
 
+configure_logging(config.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Assistant API")

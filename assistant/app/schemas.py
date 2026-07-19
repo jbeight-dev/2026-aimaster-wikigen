@@ -17,6 +17,7 @@ class Source(BaseModel):
     document_id: str
     title: str
     score: float
+    heading: str = ""
 
 
 class ChatResponse(BaseModel):

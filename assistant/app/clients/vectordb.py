@@ -22,7 +22,12 @@ def search_summary(
         limit=top_k,
     ).points
     return [
-        {"doc_id": h.payload["doc_id"], "title": h.payload.get("title", ""), "score": h.score}
+        {
+            "doc_id": h.payload["doc_id"],
+            "title": h.payload.get("title", ""),
+            "keywords": h.payload.get("keywords", []),
+            "score": h.score,
+        }
         for h in hits
     ]
 
@@ -39,7 +44,13 @@ def search_chunk(
     return [
         {
             "doc_id": h.payload["doc_id"],
+            "chunk_id": h.payload.get("chunk_id", ""),
+            "heading": h.payload.get("heading", ""),
             "section_path": h.payload.get("section_path", ""),
+            # Builder가 아직 채우지 않았을 수 있는 필드 - 없으면 nodes.build_context가
+            # Postgres 문서 전문으로 폴백한다.
+            "content": h.payload.get("content", ""),
+            "keywords": h.payload.get("keywords", []),
             "score": h.score,
         }
         for h in hits

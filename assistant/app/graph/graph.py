@@ -8,8 +8,11 @@ from .state import AssistantState
 def build_graph(db: Session):
     graph = StateGraph(AssistantState)
 
+    graph.add_node("analyze_question", nodes.analyze_question)
+    graph.add_node("optimize_query", nodes.optimize_query)
     graph.add_node("retrieve_summary", nodes.retrieve_summary)
     graph.add_node("retrieve_chunk", nodes.retrieve_chunk)
+    graph.add_node("rerank_chunks", nodes.rerank_chunks)
     graph.add_node("no_context_answer", nodes.no_context_answer)
     graph.add_node("build_context", nodes.make_build_context(db))
     graph.add_node("confidence_checker", nodes.confidence_checker)
@@ -17,17 +20,20 @@ def build_graph(db: Session):
     graph.add_node("generate_answer", nodes.generate_answer_node)
     graph.add_node("extract_sources", nodes.extract_sources)
 
-    graph.add_edge(START, "retrieve_summary")
+    graph.add_edge(START, "analyze_question")
+    graph.add_edge("analyze_question", "optimize_query")
+    graph.add_edge("optimize_query", "retrieve_summary")
     graph.add_edge("retrieve_summary", "retrieve_chunk")
     graph.add_conditional_edges(
         "retrieve_chunk",
         nodes.route_after_hits,
         {
-            "build_context": "build_context",
+            "rerank_chunks": "rerank_chunks",
             "query_rewriter": "query_rewriter",
             "no_context_answer": "no_context_answer",
         },
     )
+    graph.add_edge("rerank_chunks", "build_context")
     graph.add_edge("build_context", "confidence_checker")
     graph.add_conditional_edges(
         "confidence_checker",

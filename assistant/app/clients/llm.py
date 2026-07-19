@@ -1,8 +1,9 @@
 import json
+import time
 
 from openai import AzureOpenAI
 
-from .. import config
+from .. import config, observability
 
 _client = AzureOpenAI(
     azure_endpoint=config.OPENAI_BASE_URL,
@@ -17,8 +18,38 @@ SYSTEM_PROMPT = (
 )
 
 
+def _chat(tag: str, **kwargs):
+    """OpenAI Chat Completions 호출을 감싸 응답시간/토큰 사용량을 기록한다 (PRD 25장)."""
+    start = time.perf_counter()
+    response = _client.chat.completions.create(**kwargs)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    usage = None
+    if response.usage:
+        usage = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+    observability.record_llm_call(tag, elapsed_ms, usage)
+    return response
+
+
+def _embed(tag: str, **kwargs):
+    start = time.perf_counter()
+    response = _client.embeddings.create(**kwargs)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    usage = None
+    if response.usage:
+        usage = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+    observability.record_llm_call(tag, elapsed_ms, usage)
+    return response
+
+
 def embed_text(text: str) -> list[float]:
-    response = _client.embeddings.create(model=config.EMBEDDING_MODEL, input=text)
+    response = _embed("embed_text", model=config.EMBEDDING_MODEL, input=text)
     return response.data[0].embedding
 
 
@@ -43,11 +74,53 @@ def generate_answer(
         }
     )
 
-    response = _client.chat.completions.create(
-        model=config.CHAT_MODEL,
-        messages=messages,
-    )
+    response = _chat("generate_answer", model=config.CHAT_MODEL, messages=messages)
     return response.choices[0].message.content
+
+
+def analyze_question(question: str, history: list[dict]) -> str:
+    """Question Analyzer: 멀티턴 대화 맥락을 반영해 독립적인 검색 질문으로 재구성한다."""
+    transcript = "\n".join(
+        f"{'assistant' if turn['role'] == 'assistant' else 'user'}: {turn['text']}"
+        for turn in history[-6:]
+    )
+    prompt = (
+        "너는 대화형 검색 질의 분석기다. 아래 대화 이력을 참고해 사용자의 마지막 질문을 "
+        "이전 맥락 없이도 이해할 수 있는 독립적인 검색 질문으로 바꿔라.\n\n"
+        "규칙:\n"
+        "1. 지시어(이거/그거/저거 등)나 생략된 주어·목적어를 대화 이력에서 찾아 명시한다.\n"
+        "2. 질문의 핵심 의도와 범위는 바꾸지 않는다.\n"
+        "3. 대화 이력에 없는 내용을 임의로 추가하지 않는다.\n"
+        "4. 불필요한 인사말이나 수식어는 제거한다.\n"
+        "5. 결과는 검색에 적합한 간결한 한 문장으로 작성한다.\n\n"
+        f"대화 이력:\n{transcript}\n\n마지막 질문: {question}\n\n"
+        "독립적인 검색 질문만 출력하라. 설명이나 따옴표를 추가하지 마라."
+    )
+
+    response = _chat(
+        "analyze_question", model=config.CHAT_MODEL, messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content.strip()
+
+
+def optimize_query(question: str) -> str:
+    """Query Optimizer: 제품명/기능명/기술 용어를 명확히 해 검색 정확도를 높인다."""
+    prompt = (
+        "너는 위키 검색 질의 최적화기다. 아래 질문을 검색 정확도가 높은 질의로 다듬어라.\n\n"
+        "규칙:\n"
+        "1. 제품명, 기능명, 기술 용어가 모호하면 문서에서 흔히 쓰이는 정식 명칭으로 명확히 한다.\n"
+        "2. 질문에 없는 제품/기능/조건을 임의로 추가하지 않는다.\n"
+        "3. 인사말, 존댓말, 불필요한 수식어는 제거한다.\n"
+        "4. 테이블명, 컬럼명, SQL, API명, 오류 메시지, 식별자는 원문 그대로 유지한다.\n"
+        "5. 결과는 검색에 적합한 간결한 한 문장으로 작성한다.\n\n"
+        f"질문: {question}\n\n"
+        "최적화된 검색어만 출력하라. 설명이나 따옴표를 추가하지 마라."
+    )
+
+    response = _chat(
+        "optimize_query", model=config.CHAT_MODEL, messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content.strip()
 
 
 def summarize_history(history: list[dict]) -> str:
@@ -66,9 +139,8 @@ def summarize_history(history: list[dict]) -> str:
         f"대화 기록:\n{transcript}\n\n요약:"
     )
 
-    response = _client.chat.completions.create(
-        model=config.CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+    response = _chat(
+        "summarize_history", model=config.CHAT_MODEL, messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
 
@@ -83,7 +155,8 @@ def evaluate_context(question: str, context: str) -> dict:
         f"질문: {question}\n\n컨텍스트:\n{context}\n\n"
         '형식: {"context_precision": 0.0, "context_recall": 0.0}'
     )
-    response = _client.chat.completions.create(
+    response = _chat(
+        "evaluate_context",
         model=config.CHAT_MODEL,
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
@@ -113,8 +186,7 @@ def rewrite_query(original_question: str, previous_query: str) -> str:
         "재작성된 검색어만 출력하라. 설명이나 따옴표를 추가하지 마라."
     )
 
-    response = _client.chat.completions.create(
-        model=config.CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+    response = _chat(
+        "rewrite_query", model=config.CHAT_MODEL, messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
