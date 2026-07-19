@@ -158,6 +158,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setToken(token);
     setCurrentUser(user);
     setAccountMenuOpen(false);
+
+    const { items: spaceItems } = await spacesApi.listSpaces();
+    setSpaces(spaceItems);
+    setSpaceData({});
+    setActiveSpaceId(null);
+    setActiveTab('upload');
+    setActiveReviewDocId(null);
   }, []);
 
   const toggleSidebar = useCallback(() => setSidebarCollapsed((v) => !v), []);

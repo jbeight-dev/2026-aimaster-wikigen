@@ -78,6 +78,8 @@ class FileSchema(BaseModel):
     space_id: str
     name: str
     size_bytes: int
+    storage_path: Optional[str] = None
+    checksum: Optional[str] = None
     status: str
     step_index: int
     step_message: Optional[str] = None
@@ -153,6 +155,45 @@ class DocumentRejectRequest(BaseModel):
 
 class DocumentUpdateRequest(BaseModel):
     sections: list[DocumentSection]
+
+
+class VerifyFinding(BaseModel):
+    claim: str
+    grounded: bool
+    evidence: Optional[str] = None
+    severity: str
+
+
+class VerifyValueChange(BaseModel):
+    kind: str
+    original_value: str
+    changed_value: str
+    evidence: Optional[str] = None
+
+
+class VerifyRelationSuggestion(BaseModel):
+    action: str
+    type: str
+    target: str
+    confidence: float
+    rationale: str
+    status: str = "proposed"
+
+
+class VerificationReport(BaseModel):
+    doc_id: str
+    verdict: str
+    score: float
+    attempt: int
+    faithfulness: list[VerifyFinding] = []
+    completeness: list[str] = []
+    value_changes: list[VerifyValueChange] = []
+    schema_issues: list[str] = []
+    relations: list[VerifyRelationSuggestion] = []
+
+
+class DocumentVerifyResponse(BaseModel):
+    report: VerificationReport
 
 
 # ---- Wiki ----

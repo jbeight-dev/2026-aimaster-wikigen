@@ -82,7 +82,7 @@ function StatusAction({
 }) {
   const { isHovered, hoverProps } = useHover();
 
-  if (file.status === 'idle') {
+  if (file.status === 'uploaded') {
     return (
       <button
         onClick={onAnalyze}

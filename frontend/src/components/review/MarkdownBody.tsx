@@ -1,35 +1,51 @@
+import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fonts, radii } from '../../theme/tokens';
+import { stripHtmlComments, type FlatHeading } from '../../utils/markdownHeadings';
 
-const components: Components = {
-  h1: ({ children }) => (
-    <h1 style={{ fontFamily: fonts.heading, fontWeight: 500, fontSize: 22, margin: '18px 0 10px' }}>{children}</h1>
+// 모듈 스코프 상수로 고정 — 매 렌더마다 새 배열을 넘기면 ReactMarkdown이 내부 프로세서를 다시 만든다.
+const REMARK_PLUGINS = [remarkGfm];
+
+/**
+ * Looks up a heading's anchor by its source line rather than a render-order counter.
+ * A counter would double-count under React StrictMode, which invokes each of these
+ * inline heading components twice per commit and corrupts any shared mutable state.
+ * `node.position.start.line` is stable across both invocations of the same node, so
+ * a pure lookup keeps the id consistent with the anchors used by the left-nav TOC.
+ */
+function createComponents(headingsByLine?: Map<number, string>): Components {
+  const idFor = (line: number | undefined) => (line !== undefined ? headingsByLine?.get(line) : undefined);
+
+  return {
+  h1: ({ node, children }) => (
+    <h1 id={idFor(node?.position?.start.line)} style={{ fontFamily: fonts.heading, fontWeight: 500, fontSize: 22, margin: '18px 0 10px' }}>{children}</h1>
   ),
-  h2: ({ children }) => (
-    <h2 style={{ fontFamily: fonts.heading, fontWeight: 500, fontSize: 18, margin: '16px 0 8px' }}>{children}</h2>
+  h2: ({ node, children }) => (
+    <h2 id={idFor(node?.position?.start.line)} style={{ fontFamily: fonts.heading, fontWeight: 500, fontSize: 18, margin: '16px 0 8px' }}>{children}</h2>
   ),
-  h3: ({ children }) => (
-    <h3 style={{ fontSize: 15, fontWeight: 600, margin: '14px 0 6px' }}>{children}</h3>
+  h3: ({ node, children }) => (
+    <h3 id={idFor(node?.position?.start.line)} style={{ fontFamily: fonts.body, fontSize: 15, fontWeight: 600, margin: '14px 0 6px' }}>{children}</h3>
   ),
-  h4: ({ children }) => <h4 style={{ fontSize: 14, fontWeight: 600, margin: '12px 0 6px' }}>{children}</h4>,
-  h5: ({ children }) => <h5 style={{ fontSize: 13.5, fontWeight: 600, margin: '10px 0 6px' }}>{children}</h5>,
-  h6: ({ children }) => <h6 style={{ fontSize: 13, fontWeight: 600, margin: '10px 0 6px' }}>{children}</h6>,
+  h4: ({ node, children }) => <h4 id={idFor(node?.position?.start.line)} style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, margin: '12px 0 6px' }}>{children}</h4>,
+  h5: ({ node, children }) => <h5 id={idFor(node?.position?.start.line)} style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: 600, margin: '10px 0 6px' }}>{children}</h5>,
+  h6: ({ node, children }) => <h6 id={idFor(node?.position?.start.line)} style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, margin: '10px 0 6px' }}>{children}</h6>,
   p: ({ children }) => (
-    <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.65, opacity: 0.85 }}>{children}</p>
+    <p style={{ fontFamily: fonts.body, margin: '0 0 10px', fontSize: 14, lineHeight: 1.65, opacity: 0.85 }}>{children}</p>
   ),
   a: ({ children, href }) => (
     <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)' }}>
       {children}
     </a>
   ),
-  ul: ({ children }) => <ul style={{ margin: '0 0 10px', paddingLeft: 20, fontSize: 14, lineHeight: 1.6 }}>{children}</ul>,
-  ol: ({ children }) => <ol style={{ margin: '0 0 10px', paddingLeft: 20, fontSize: 14, lineHeight: 1.6 }}>{children}</ol>,
+  ul: ({ children }) => <ul style={{ fontFamily: fonts.body, margin: '0 0 10px', paddingLeft: 20, fontSize: 14, lineHeight: 1.6 }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ fontFamily: fonts.body, margin: '0 0 10px', paddingLeft: 20, fontSize: 14, lineHeight: 1.6 }}>{children}</ol>,
   li: ({ children }) => <li style={{ marginBottom: 4, opacity: 0.85 }}>{children}</li>,
   blockquote: ({ children }) => (
     <blockquote
       style={{
+        fontFamily: fonts.body,
         margin: '0 0 10px',
         padding: '4px 12px',
         borderLeft: '3px solid rgba(var(--ink-rgb), 0.2)',
@@ -94,16 +110,23 @@ const components: Components = {
     <td style={{ padding: '8px 10px', borderBottom: '1px solid rgba(var(--ink-rgb), 0.06)' }}>{children}</td>
   ),
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(var(--ink-rgb), 0.12)', margin: '14px 0' }} />,
-};
-
-function stripHtmlComments(content: string): string {
-  return content.replace(/<!--[\s\S]*?-->/g, '');
+  };
 }
 
-export function MarkdownBody({ content }: { content: string }) {
+export function MarkdownBody({ content, headings }: { content: string; headings?: FlatHeading[] }) {
+  // components 객체를 매 렌더마다 새로 만들면 React가 h1~h6를 "다른 타입"으로 보고 통째로
+  // 재마운트한다. 이 파일을 쓰는 SpaceWikiView는 스크롤할 때마다 재렌더되므로, 재마운트가
+  // 일어나면 스크롤 위치 추적용으로 잡아둔 heading 엘리먼트 참조가 즉시 detached 상태가 되어
+  // 위치 계산이 깨진다. headings가 바뀌지 않는 한 components 참조를 고정해 재마운트를 막는다.
+  const headingsByLine = useMemo(
+    () => headings && new Map(headings.map((h) => [h.line, h.anchor])),
+    [headings],
+  );
+  const components = useMemo(() => createComponents(headingsByLine), [headingsByLine]);
+
   return (
     <div style={{ color: 'var(--text)' }}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
         {stripHtmlComments(content)}
       </ReactMarkdown>
     </div>

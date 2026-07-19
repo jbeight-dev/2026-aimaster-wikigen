@@ -17,6 +17,8 @@ from ..schemas import (
     DocumentResponse,
     DocumentSchema,
     DocumentUpdateRequest,
+    DocumentVerifyResponse,
+    VerificationReport,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,18 @@ async def _call_builder_approve(wiki_doc_id: str) -> None:
     except httpx.HTTPError:
         logger.exception("builder approve call failed for wiki_doc_id %s", wiki_doc_id)
         raise AppError(502, "BUILDER_APPROVE_FAILED", "위키 색인 처리 중 오류가 발생했어요.") from None
+
+
+async def _call_builder_verify(wiki_doc_id: str) -> dict:
+    url = f"{BUILDER_API_BASE_URL}/builderapi/v1/documents/{wiki_doc_id}/verify"
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(url)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception("builder verify call failed for wiki_doc_id %s", wiki_doc_id)
+        raise AppError(502, "BUILDER_VERIFY_FAILED", "AI 검토 의견을 가져오는 중 오류가 발생했어요.") from None
+    return response.json()["report"]
 
 
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
@@ -99,7 +113,7 @@ def list_documents(
         items=[DocumentSchema.model_validate(d) for d in documents]
     )
 
-
+# Step3. 문서 승인
 @router.post("/documents/{document_id}/approve", response_model=DocumentResponse)
 async def approve_document(
     document_id: str,
@@ -116,7 +130,7 @@ async def approve_document(
 
     await _call_builder_approve(document.wiki_doc_id)
 
-    document.version += 1
+    #document.version += 1
     document.status = "approved"
     document.history = document.history + [
         {"label": f"v{document.version}로 승인됨", "time": _now_iso()}
@@ -124,6 +138,22 @@ async def approve_document(
     db.commit()
     db.refresh(document)
     return DocumentResponse(document=DocumentSchema.model_validate(document))
+
+
+@router.post("/documents/{document_id}/verify", response_model=DocumentVerifyResponse)
+async def verify_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = _get_document_or_404(db, document_id)
+    if not document.wiki_doc_id:
+        raise AppError(
+            400, "DOCUMENT_NOT_LINKED", "원본 위키 문서와 연결되어 있지 않아 검토 의견을 가져올 수 없습니다."
+        )
+
+    report = await _call_builder_verify(document.wiki_doc_id)
+    return DocumentVerifyResponse(report=VerificationReport.model_validate(report))
 
 
 @router.post("/documents/{document_id}/reject", response_model=DocumentResponse)

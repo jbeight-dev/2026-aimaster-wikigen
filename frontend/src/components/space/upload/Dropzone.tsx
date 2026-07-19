@@ -40,7 +40,7 @@ export function Dropzone({ onFilesSelected }: DropzoneProps) {
       <div style={{ fontSize: 28, marginBottom: 10, opacity: 0.6 }}>⬆</div>
       <p style={{ margin: '0 0 4px', fontSize: 14.5 }}>파일을 드래그하거나 클릭하여 업로드하세요</p>
       <p style={{ margin: '0 0 18px', fontSize: 12, fontFamily: fonts.mono, opacity: 0.5 }}>
-        PDF · DOCX · TXT · Markdown · SQLite(db/sqlite/sqlite3)
+        TXT · Markdown · CSV · SQLite(db/sqlite/sqlite3)
       </p>
       <button
         onClick={() => inputRef.current?.click()}

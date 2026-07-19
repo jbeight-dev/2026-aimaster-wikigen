@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import mimetypes
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["files"])
 
 BUILDER_API_BASE_URL = os.getenv("builder_API_BASE_URL", "http://localhost:8002")
-BUILDER_INGEST_URL = f"{BUILDER_API_BASE_URL}/builderapi/v1/ingest"
+BUILDER_BUILD_URL = f"{BUILDER_API_BASE_URL}/builderapi/v1/build"
 
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "storage" / "uploads"
 
@@ -76,26 +77,6 @@ def _parse_builder_dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-async def _fetch_builder_document(client: httpx.AsyncClient, doc_id: str) -> dict | None:
-    url = f"{BUILDER_API_BASE_URL}/builderapi/v1/documents/{doc_id}"
-    logger.debug("fetching builder document doc_id=%s url=%s", doc_id, url)
-    try:
-        response = await client.get(url)
-        response.raise_for_status()
-        logger.info("fetched builder document doc_id=%s status=%s", doc_id, response.status_code)
-        return response.json()
-    except httpx.HTTPStatusError as exc:
-        logger.warning(
-            "builder document fetch returned error status for doc_id %s: %s",
-            doc_id,
-            exc.response.status_code,
-        )
-        return None
-    except httpx.HTTPError:
-        logger.exception("builder document fetch failed for doc_id %s", doc_id)
-        return None
-
-
 def _upsert_wikimd(db: Session, file: File, doc_id: str, payload: dict) -> None:
     document = payload["document"]
     row = db.get(WikiMd, doc_id)
@@ -130,33 +111,22 @@ def _upsert_wikimd(db: Session, file: File, doc_id: str, payload: dict) -> None:
     row.body = payload["body"]
 
 
-async def _fetch_and_persist_wikimd_docs(file: File, doc_ids: list[str]) -> None:
-    if not doc_ids:
-        logger.info("no doc_ids to fetch for file %s", file.file_id)
-        return
-
-    logger.info("fetching %d builder document(s) for file %s", len(doc_ids), file.file_id)
-    fetched: list[tuple[str, dict]] = []
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for doc_id in doc_ids:
-            payload = await _fetch_builder_document(client, doc_id)
-            if payload is not None:
-                fetched.append((doc_id, payload))
-
-    logger.info(
-        "fetched %d/%d builder document(s) successfully for file %s",
-        len(fetched),
-        len(doc_ids),
-        file.file_id,
-    )
-    if not fetched:
+def _persist_built_documents(file: File, documents: list[dict]) -> None:
+    # /build의 result 이벤트는 문서 본문(document/body)을 doc_id와 함께 바로 실어주므로,
+    # /ingest 때처럼 GET /documents/{doc_id}로 다시 조회할 필요가 없다.
+    if not documents:
+        logger.info("no documents to persist for file %s", file.file_id)
         return
 
     db = SessionLocal()
     try:
-        for doc_id, payload in fetched:
+        for entry in documents:
+            doc_id = entry.get("doc_id")
+            if not doc_id:
+                logger.warning("skipping built document without doc_id for file %s", file.file_id)
+                continue
             try:
-                _upsert_wikimd(db, file, doc_id, payload)
+                _upsert_wikimd(db, file, doc_id, entry)
                 db.commit()
             except Exception:
                 logger.exception("failed to persist wikimd row for doc_id %s", doc_id)
@@ -193,25 +163,25 @@ async def _iter_sse_events(response: httpx.Response):
             logger.exception("failed to parse builder SSE payload: %s", payload)
 
 
-async def _call_builder_ingest(file: File) -> None:
+async def _call_builder_build(file: File) -> None:
     path = _file_storage_path(file.file_id, file.name)
     if not path.exists():
-        logger.warning("builder ingest skipped: no stored content for file %s", file.file_id)
+        logger.warning("builder build skipped: no stored content for file %s", file.file_id)
         return
 
     content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
     ext = _file_extension(file.name)
     ingest_filename = f"{file.file_id}.{ext}" if ext else file.file_id
     logger.info(
-        "calling builder ingest for file %s (name=%s, ingest_filename=%s, content_type=%s) at %s",
+        "calling builder build for file %s (name=%s, ingest_filename=%s, content_type=%s) at %s",
         file.file_id,
         file.name,
         ingest_filename,
         content_type,
-        BUILDER_INGEST_URL,
+        BUILDER_BUILD_URL,
     )
 
-    doc_ids: list[str] = []
+    built_documents: list[dict] = []
     error_detail: str | None = None
     finished_steps = 0
     try:
@@ -219,7 +189,7 @@ async def _call_builder_ingest(file: File) -> None:
             with path.open("rb") as fh:
                 async with client.stream(
                     "POST",
-                    BUILDER_INGEST_URL,
+                    BUILDER_BUILD_URL,
                     data={"file_id": file.file_id, "space_id": file.space_id},
                     files={"file": (ingest_filename, fh, content_type)},
                 ) as response:
@@ -240,19 +210,23 @@ async def _call_builder_ingest(file: File) -> None:
                             )
                             _update_analysis_step(file.file_id, index=finished_steps)
                         elif event_type == "result":
-                            doc_ids = event.get("doc_ids", [])
+                            built_documents = event.get("documents", [])
                         elif event_type == "error":
                             error_detail = event.get("detail", "")
     except httpx.HTTPError:
-        logger.exception("builder ingest call failed for file %s", file.file_id)
+        logger.exception("builder build call failed for file %s", file.file_id)
         return
 
     if error_detail is not None:
-        logger.error("builder ingest reported failure for file %s: %s", file.file_id, error_detail)
+        logger.error("builder build reported failure for file %s: %s", file.file_id, error_detail)
         return
 
-    logger.info("builder ingest succeeded for file %s: doc_ids=%s", file.file_id, doc_ids)
-    await _fetch_and_persist_wikimd_docs(file, doc_ids)
+    logger.info(
+        "builder build succeeded for file %s: doc_ids=%s",
+        file.file_id,
+        [entry.get("doc_id") for entry in built_documents],
+    )
+    _persist_built_documents(file, built_documents)
 
 
 def _build_document_from_wiki(file: File, entry: WikiMd) -> Document:
@@ -330,7 +304,7 @@ def _finalize_analysis(file_id: str) -> None:
     finally:
         db.close()
 
-
+# Step1. 파일 업로드 시 호출
 @router.post("/spaces/{space_id}/files", response_model=FileListResponse, status_code=201)
 async def upload_files(
     space_id: str,
@@ -349,20 +323,23 @@ async def upload_files(
     created: list[File] = []
     for upload in uploads:
         contents = await upload.read()
+        checksum = hashlib.sha256(contents).hexdigest()
         ext = _file_extension(upload.filename or "")
-        status = "idle" if ext in SUPPORTED_FILE_EXTENSIONS else "upload_failed"
+        status = "uploaded" if ext in SUPPORTED_FILE_EXTENSIONS else "upload_failed"
         file = File(
             file_id=new_id("file"),
             space_id=space_id,
             name=upload.filename,
             size_bytes=len(contents),
+            checksum=checksum,
             status=status,
         )
         db.add(file)
         created.append(file)
 
-        if status == "idle":
+        if status == "uploaded":
             path = _file_storage_path(file.file_id, file.name)
+            file.storage_path = str(path)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(contents)
             logger.info(
@@ -415,7 +392,7 @@ def get_file(
     file = _get_file_or_404(db, file_id)
     return FileResponse(file=FileSchema.model_validate(file))
 
-
+## Step2. 파일 분석 요청
 @router.post("/files/{file_id}/analyze", response_model=FileAnalyzeResponse, status_code=202)
 async def analyze_file(
     file_id: str,
@@ -423,7 +400,7 @@ async def analyze_file(
     current_user: User = Depends(get_current_user),
 ):
     file = _get_file_or_404(db, file_id)
-    if file.status != "idle":
+    if file.status != "uploaded":
         raise AppError(400, "FILE_NOT_ANALYZABLE", "분석을 시작할 수 없는 상태입니다.")
 
     logger.info("starting analysis for file %s '%s'", file.file_id, file.name)
@@ -431,7 +408,8 @@ async def analyze_file(
     file.step_index = 0
     file.step_message = BUILDER_STEP_MESSAGES["intake"]
     db.commit()
-    await _call_builder_ingest(file)
+    ### Builder API 호출하여 분석 시작
+    await _call_builder_build(file)
     _finalize_analysis(file.file_id)
     db.refresh(file)
     logger.info("analysis request finished for file %s: status=%s", file.file_id, file.status)
@@ -454,7 +432,7 @@ async def retry_file(
     file.step_index = 0
     file.step_message = BUILDER_STEP_MESSAGES["intake"]
     db.commit()
-    await _call_builder_ingest(file)
+    await _call_builder_build(file)
     _finalize_analysis(file.file_id)
     db.refresh(file)
     logger.info("retry finished for file %s: status=%s", file.file_id, file.status)

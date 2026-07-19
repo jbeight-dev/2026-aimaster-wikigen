@@ -14,7 +14,7 @@ export interface Space {
   created_at: string;
 }
 
-export type FileStatus = 'idle' | 'analyzing' | 'done' | 'analysis_failed' | 'upload_failed';
+export type FileStatus = 'uploaded' | 'analyzing' | 'done' | 'analysis_failed' | 'upload_failed';
 
 export interface UploadedFile {
   file_id: string;
@@ -77,6 +77,41 @@ export interface WikiDocument {
   sections: DocumentSection[];
   related_document_ids: string[];
   history: DocumentHistoryEntry[];
+}
+
+export interface VerifyFinding {
+  claim: string;
+  grounded: boolean;
+  evidence: string | null;
+  severity: 'low' | 'med' | 'high';
+}
+
+export interface VerifyValueChange {
+  kind: 'number' | 'sql' | 'command' | 'config';
+  original_value: string;
+  changed_value: string;
+  evidence: string | null;
+}
+
+export interface VerifyRelationSuggestion {
+  action: 'keep' | 'prune' | 'add';
+  type: string;
+  target: string;
+  confidence: number;
+  rationale: string;
+  status: string;
+}
+
+export interface VerificationReport {
+  doc_id: string;
+  verdict: 'pass' | 'regenerate' | 'review';
+  score: number;
+  attempt: number;
+  faithfulness: VerifyFinding[];
+  completeness: string[];
+  value_changes: VerifyValueChange[];
+  schema_issues: string[];
+  relations: VerifyRelationSuggestion[];
 }
 
 export interface ChatMessage {

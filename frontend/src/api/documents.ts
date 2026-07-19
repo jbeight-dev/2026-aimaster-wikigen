@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { DocumentSection, DocumentStatus, WikiDocument } from './types';
+import type { DocumentSection, DocumentStatus, VerificationReport, WikiDocument } from './types';
 
 export function getDocument(documentId: string): Promise<{ document: WikiDocument }> {
   return apiClient.get(`/documents/${documentId}`);
@@ -25,6 +25,10 @@ export function rejectDocument(
 
 export function reopenDocument(documentId: string): Promise<{ document: WikiDocument }> {
   return apiClient.post(`/documents/${documentId}/reopen`);
+}
+
+export function verifyDocument(documentId: string): Promise<{ report: VerificationReport }> {
+  return apiClient.post(`/documents/${documentId}/verify`);
 }
 
 export function updateDocument(

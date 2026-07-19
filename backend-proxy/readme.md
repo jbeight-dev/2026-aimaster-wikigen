@@ -82,7 +82,7 @@ sequenceDiagram
 
     C->>BP: POST /files/{id}/analyze
     BP->>DB: status=analyzing, step_index=0
-    BP->>BD: POST /builderapi/v1/ingest (파일 스트림)
+    BP->>BD: POST /builderapi/v1/build (파일 스트림)
     activate BD
     loop SSE 이벤트 스트림
         BD-->>BP: event=start (step명)
@@ -90,13 +90,11 @@ sequenceDiagram
         BD-->>BP: event=finish (완료 step)
         BP->>DB: step_index 증가
     end
-    BD-->>BP: event=result (doc_ids[])
+    BD-->>BP: event=result (documents[]: doc_id+document+body)
     deactivate BD
 
-    loop doc_ids 만큼
-        BP->>BD: GET /builderapi/v1/documents/{doc_id}
-        BD-->>BP: 문서 payload
-        BP->>DB: WikiMd upsert
+    loop documents 만큼
+        BP->>DB: WikiMd upsert (result에 실린 payload 그대로, 추가 조회 없음)
     end
 
     BP->>BP: _finalize_analysis

@@ -32,7 +32,7 @@ export function documentStatusStyle(status: DocumentStatus): BadgeStyle {
 
 export function fileStatusLabel(status: FileStatus): string {
   switch (status) {
-    case 'idle':
+    case 'uploaded':
       return '대기 중';
     case 'analyzing':
       return '분석 중';

@@ -16,13 +16,12 @@ FILE_STATUSES = ["idle", "analyzing", "done", "analysis_failed", "upload_failed"
 DOCUMENT_STATUSES = ["pending", "approved", "rejected", "deleted"]
 SUPPORTED_FILE_EXTENSIONS = [
     "pdf",
-    "docx",
-    "doc",
     "txt",
     "md",
     "db",
     "sqlite",
     "sqlite3",
+    "csv",
 ]
 
 
@@ -58,6 +57,8 @@ class File(Base):
     space_id = Column(String, ForeignKey("spaces.space_id"), nullable=False)
     name = Column(String, nullable=False)
     size_bytes = Column(Integer, nullable=False)
+    storage_path = Column(String, nullable=True)
+    checksum = Column(String, nullable=True)
     status = Column(String, nullable=False, default="idle")
     step_index = Column(Integer, nullable=False, default=0)
     step_message = Column(String, nullable=True)

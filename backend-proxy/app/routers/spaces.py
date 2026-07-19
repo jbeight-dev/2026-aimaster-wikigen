@@ -69,7 +69,12 @@ def list_spaces(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    spaces = db.query(Space).order_by(Space.created_at.desc()).all()
+    spaces = (
+        db.query(Space)
+        .filter(Space.owner_id == current_user.user_id)
+        .order_by(Space.created_at.desc())
+        .all()
+    )
     return SpaceListResponse(items=[_space_to_schema(db, s) for s in spaces])
 
 

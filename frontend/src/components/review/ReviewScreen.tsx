@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { DocumentSection, WikiDocument } from '../../api/types';
+import * as documentsApi from '../../api/documents';
+import { ApiError } from '../../api/client';
+import type { DocumentSection, VerificationReport, WikiDocument } from '../../api/types';
 import { useAppState } from '../../state/AppState';
 import { fonts } from '../../theme/tokens';
 import { documentStatusStyle } from '../../utils/statusStyle';
 import { useHover } from '../../utils/useHover';
+import { AIReviewOpinion } from './AIReviewOpinion';
 import { FlagBanner } from './FlagBanner';
 import { SectionRenderer } from './SectionRenderer';
 import { RelatedDocuments } from './RelatedDocuments';
@@ -27,11 +30,44 @@ export function ReviewScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isRejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  const [verifyReport, setVerifyReport] = useState<VerificationReport | null>(null);
+  const [isVerifyLoading, setVerifyLoading] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   useEffect(() => {
     setIsEditing(false);
     setRejecting(false);
     setReason('');
+  }, [activeReviewDocument?.document_id]);
+
+  useEffect(() => {
+    const documentId = activeReviewDocument?.document_id;
+    if (!documentId) {
+      setVerifyReport(null);
+      setVerifyError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setVerifyReport(null);
+    setVerifyError(null);
+    setVerifyLoading(true);
+    documentsApi
+      .verifyDocument(documentId)
+      .then(({ report }) => {
+        if (!cancelled) setVerifyReport(report);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setVerifyError(err instanceof ApiError ? err.message : 'AI 검토 의견을 가져오지 못했어요.');
+      })
+      .finally(() => {
+        if (!cancelled) setVerifyLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeReviewDocument?.document_id]);
 
   if (!activeReviewDocument) return null;
@@ -133,6 +169,8 @@ export function ReviewScreen() {
       <ReviewActionBar position="top" {...actionBarProps} />
 
       <div style={{ marginTop: 24 }}>
+        <AIReviewOpinion report={verifyReport} isLoading={isVerifyLoading} error={verifyError} />
+
         <FlagBanner flags={doc.flags} />
 
         {(isEditing ? draftSections : doc.sections).map((section, i) => (
