@@ -2,7 +2,7 @@ Architecture
 
 1. 개요
 
-본 시스템은 사용자가 Frontend를 통해 서비스를 이용하고, Frontend의 요청을 Proxy Backend가 받아 필요한 내부 서비스로 전달하는 구조로 구성한다.
+본 시스템은 사용자가 Frontend를 통해 서비스를 이용하고, Frontend의 요청을 Proxy Backend가 받아 필요한 내부 서비스로 전달하는 구조로 구성한다. 단, Assistant 기능은 Frontend가 Assistant Backend를 직접 호출한다.
 
 현재 주요 서비스 구성은 다음과 같다.
 
@@ -12,17 +12,21 @@ User
 Frontend
 localhost:3000
   │
-  ▼
-Proxy Backend
-localhost:8000
+  ├──▶ Proxy Backend
+  │    localhost:8000
+  │      │
+  │      ▼
+  │    Builder Backend
+  │    localhost:8002
   │
-  ▼
-Builder Backend
-localhost:8002
+  └──▶ Assistant Backend
+       localhost:8001
 
 2. 구성 요소
 
 2.1 Frontend
+
+Frontend는 React 19 + TypeScript + Vite로 구성되어 있습니다. 그 외 마크다운 렌더링용 react-markdown(+remark-gfm), 린트는 oxlint를 사용합니다.
 
 * 주소: http://localhost:3000
 * 역할:
@@ -31,7 +35,8 @@ localhost:8002
     * 문서 업로드 및 조회
     * Wiki 생성 요청
     * Builder 처리 결과 조회
-* 모든 Backend API 요청은 직접 Builder를 호출하지 않고 Proxy Backend를 통해 호출한다.
+* Builder 관련 API 요청은 직접 Builder를 호출하지 않고 Proxy Backend를 통해 호출한다.
+* Assistant 관련 API 요청은 Proxy Backend를 거치지 않고 Assistant Backend를 직접 호출한다.
 
 2.2 Proxy Backend
 
@@ -69,6 +74,15 @@ POST /builderapi/v1/ingest
     * Vector DB 저장 및 갱신
 
 Builder는 AI Wiki 생성과 관련된 기능에 집중하며, Frontend에서 직접 호출하지 않는다.
+
+2.4 Assistant Backend
+
+* 주소: http://localhost:8001
+* 역할:
+    * 사용자 채팅/어시스턴트 요청 처리
+    * 대화형 응답 생성
+
+Assistant Backend는 Proxy Backend를 거치지 않고 Frontend에서 직접 호출하는 예외적인 서비스이다.
 
 3. 요청 흐름
 
@@ -117,11 +131,28 @@ Proxy Backend :8000
   ▼
 Frontend :3000
 
+3.3 Assistant 호출
+
+1. 사용자가 Frontend에서 Assistant(채팅)를 사용한다.
+2. Frontend가 Assistant Backend를 직접 호출한다.
+3. Assistant Backend가 응답을 생성하여 Frontend로 반환한다.
+User
+  │
+  ▼
+Frontend :3000
+  │
+  │ Assistant 요청
+  ▼
+Assistant Backend :8001
+  │
+  ▼
+Frontend :3000
+
 4. 설계 원칙
 
-단일 Backend 진입점
+단일 Backend 진입점 (Builder 연계 기준)
 
-Frontend는 Proxy Backend만 호출한다.
+Frontend는 Builder 관련 기능에 대해서는 Proxy Backend만 호출한다.
 
 Frontend → Proxy Backend
 
@@ -129,7 +160,11 @@ Frontend → Proxy Backend
 
 Frontend → Builder
 
-이를 통해 Frontend가 내부 서비스 구조에 의존하지 않도록 한다.
+이를 통해 Frontend가 Builder의 내부 서비스 구조에 의존하지 않도록 한다.
+
+단, Assistant Backend는 예외적으로 Frontend가 직접 호출한다.
+
+Frontend → Assistant Backend
 
 역할 분리
 
@@ -146,6 +181,9 @@ Builder
 - Wiki 생성
 - Embedding
 - Vector DB 연계
+Assistant Backend
+- 채팅/어시스턴트 요청 처리
+- 대화형 응답 생성
 
 내부 서비스 캡슐화
 
@@ -170,17 +208,17 @@ ${BUILDER_API_URL}/builderapi/v1/ingest
 ┌─────────────────────────┐
 │        Frontend         │
 │     localhost:3000      │
-└────────────┬────────────┘
-             │
-             │ REST API
-             ▼
-┌─────────────────────────┐
-│     Proxy Backend       │
-│     localhost:8000      │
-│                        │
-│ - Authentication       │
-│ - Knowledge Space      │
-│ - Document Management  │
+└──────┬───────────┬──────┘
+       │           │
+       │ REST API  │ Assistant API
+       ▼           ▼
+┌─────────────────────┐   ┌─────────────────────────┐
+│   Proxy Backend      │   │    Assistant Backend    │
+│   localhost:8000      │   │     localhost:8001      │
+│                        │   │                        │
+│ - Authentication       │   │ - Chat / Assistant     │
+│ - Knowledge Space      │   │ - Response Generation  │
+│ - Document Management  │   └─────────────────────────┘
 │ - Builder API Proxy    │
 └────────────┬────────────┘
              │
@@ -202,6 +240,7 @@ Component	Port	URL
 Frontend	3000	http://localhost:3000
 Proxy Backend	8000	http://localhost:8000
 Builder Backend	8002	http://localhost:8002
+Assistant Backend	8001	http://localhost:8001
 
 7. 핵심 호출 규칙
 
@@ -210,6 +249,11 @@ User
 → Proxy Backend
 → Builder
 
-Frontend는 Proxy Backend만 호출하며, Builder는 내부 서비스로 취급한다.
+User
+→ Frontend
+→ Assistant Backend
+
+Frontend는 Builder 관련 기능에 대해서는 Proxy Backend만 호출하며, Builder는 내부 서비스로 취급한다.
+Assistant 기능은 예외적으로 Frontend가 Assistant Backend를 직접 호출한다.
 
 이 구조를 통해 향후 Builder 교체, API 변경, 인증 및 권한 처리 추가 시 Frontend 변경을 최소화한다.

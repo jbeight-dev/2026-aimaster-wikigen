@@ -169,7 +169,9 @@ export function ReviewScreen() {
       <ReviewActionBar position="top" {...actionBarProps} />
 
       <div style={{ marginTop: 24 }}>
-        <AIReviewOpinion report={verifyReport} isLoading={isVerifyLoading} error={verifyError} />
+        {doc.status !== 'approved' && (
+          <AIReviewOpinion report={verifyReport} isLoading={isVerifyLoading} error={verifyError} />
+        )}
 
         <FlagBanner flags={doc.flags} />
 

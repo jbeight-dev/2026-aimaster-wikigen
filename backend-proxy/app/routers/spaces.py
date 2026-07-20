@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -36,6 +36,53 @@ def _space_to_schema(db: Session, space: Space) -> SpaceSchema:
     )
 
 
+def _list_spaces_with_counts(db: Session, owner_id: str) -> list[SpaceSchema]:
+    file_counts_sq = (
+        db.query(
+            File.space_id.label("space_id"),
+            func.count(File.file_id).label("file_count"),
+        )
+        .filter(File.status != "deleted")
+        .group_by(File.space_id)
+        .subquery()
+    )
+    doc_counts_sq = (
+        db.query(
+            Document.space_id.label("space_id"),
+            func.sum(case((Document.status != "deleted", 1), else_=0)).label("document_count"),
+            func.sum(case((Document.status == "approved", 1), else_=0)).label("approved_count"),
+        )
+        .group_by(Document.space_id)
+        .subquery()
+    )
+    rows = (
+        db.query(
+            Space,
+            func.coalesce(file_counts_sq.c.file_count, 0),
+            func.coalesce(doc_counts_sq.c.document_count, 0),
+            func.coalesce(doc_counts_sq.c.approved_count, 0),
+        )
+        .outerjoin(file_counts_sq, file_counts_sq.c.space_id == Space.space_id)
+        .outerjoin(doc_counts_sq, doc_counts_sq.c.space_id == Space.space_id)
+        .filter(Space.owner_id == owner_id)
+        .order_by(Space.created_at.desc())
+        .all()
+    )
+    return [
+        SpaceSchema(
+            space_id=space.space_id,
+            name=space.name,
+            description=space.description,
+            owner_id=space.owner_id,
+            file_count=file_count,
+            document_count=doc_count,
+            approved_count=approved_count,
+            created_at=space.created_at,
+        )
+        for space, file_count, doc_count, approved_count in rows
+    ]
+
+
 def _get_space_or_404(db: Session, space_id: str) -> Space:
     space = db.get(Space, space_id)
     if not space:
@@ -69,13 +116,7 @@ def list_spaces(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    spaces = (
-        db.query(Space)
-        .filter(Space.owner_id == current_user.user_id)
-        .order_by(Space.created_at.desc())
-        .all()
-    )
-    return SpaceListResponse(items=[_space_to_schema(db, s) for s in spaces])
+    return SpaceListResponse(items=_list_spaces_with_counts(db, current_user.user_id))
 
 
 @router.get("/{space_id}", response_model=SpaceResponse)

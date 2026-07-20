@@ -5,7 +5,7 @@ import * as spacesApi from '../api/spaces';
 import * as filesApi from '../api/files';
 import * as documentsApi from '../api/documents';
 import * as chatApi from '../api/chat';
-import { ApiError, setToken } from '../api/client';
+import { ApiError, getToken, setToken } from '../api/client';
 import type { ChatMessage, DocumentSection, Space, User, UploadedFile, WikiDocument } from '../api/types';
 import { useAnalysisPolling } from './useAnalysisPolling';
 
@@ -130,16 +130,27 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     async function bootstrap() {
-      try {
-        const { user } = await authApi.getMe();
-        if (!cancelled) setCurrentUser(user);
-      } catch {
+      const usersPromise = authApi.listUsers();
+
+      let authUser: User;
+      if (getToken()) {
+        try {
+          authUser = (await authApi.getMe()).user;
+        } catch {
+          const { token, user } = await authApi.switchUser('usr_hong');
+          setToken(token);
+          authUser = user;
+        }
+      } else {
         const { token, user } = await authApi.switchUser('usr_hong');
         setToken(token);
-        if (!cancelled) setCurrentUser(user);
+        authUser = user;
       }
+      if (cancelled) return;
+      setCurrentUser(authUser);
+
       const [{ items: userItems }, { items: spaceItems }] = await Promise.all([
-        authApi.listUsers(),
+        usersPromise,
         spacesApi.listSpaces(),
       ]);
       if (cancelled) return;
