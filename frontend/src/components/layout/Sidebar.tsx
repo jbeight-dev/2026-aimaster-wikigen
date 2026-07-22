@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useAppState } from '../../state/AppState';
 import { fonts } from '../../theme/tokens';
 import { useHover } from '../../utils/useHover';
 
 export function Sidebar() {
-  const { spaces, activeSpaceId, selectSpace, sidebarCollapsed, toggleSidebar, openCreateSpaceModal } =
+  const { spaces, activeSpaceId, selectSpace, deleteSpace, sidebarCollapsed, toggleSidebar, openCreateSpaceModal } =
     useAppState();
 
   if (sidebarCollapsed) {
@@ -81,6 +81,11 @@ export function Sidebar() {
           documentCount={space.document_count}
           isActive={space.space_id === activeSpaceId}
           onClick={() => selectSpace(space.space_id)}
+          onDelete={() => {
+            if (window.confirm(`"${space.name}" Space를 삭제할까요? 포함된 파일과 문서가 모두 삭제됩니다.`)) {
+              deleteSpace(space.space_id);
+            }
+          }}
         />
       ))}
     </aside>
@@ -92,37 +97,74 @@ function SpaceRow({
   documentCount,
   isActive,
   onClick,
+  onDelete,
 }: {
   name: string;
   documentCount: number;
   isActive: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
+  const { isHovered, hoverProps } = useHover();
+  return (
+    <div {...hoverProps} style={{ position: 'relative' }}>
+      <button
+        onClick={onClick}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-start',
+          textAlign: 'left',
+          width: '100%',
+          padding: '9px 12px',
+          paddingRight: isHovered ? 32 : 12,
+          borderRadius: 10,
+          border: 'none',
+          borderLeft: isActive ? '3px solid var(--accent-text)' : '3px solid transparent',
+          background: isActive
+            ? 'rgba(255,138,61,0.08)'
+            : isHovered
+              ? 'rgba(var(--ink-rgb), 0.05)'
+              : 'transparent',
+          color: 'var(--text)',
+        }}
+      >
+        <span style={{ fontSize: 14, fontWeight: 500 }}>{name}</span>
+        <span style={{ fontFamily: fonts.mono, fontSize: 11, opacity: 0.55 }}>문서 {documentCount}개</span>
+      </button>
+      {isHovered && (
+        <div style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>
+          <SpaceDeleteButton
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SpaceDeleteButton({ onClick }: { onClick: (e: MouseEvent) => void }) {
   const { isHovered, hoverProps } = useHover();
   return (
     <button
       onClick={onClick}
       {...hoverProps}
+      aria-label="Space 삭제"
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        textAlign: 'left',
-        width: '100%',
-        padding: '9px 12px',
-        borderRadius: 10,
+        width: 24,
+        height: 24,
+        borderRadius: '50%',
         border: 'none',
-        borderLeft: isActive ? '3px solid var(--accent-text)' : '3px solid transparent',
-        background: isActive
-          ? 'rgba(255,138,61,0.08)'
-          : isHovered
-            ? 'rgba(var(--ink-rgb), 0.05)'
-            : 'transparent',
+        background: isHovered ? 'rgba(var(--ink-rgb), 0.1)' : 'transparent',
         color: 'var(--text)',
+        opacity: 0.6,
+        fontSize: 13,
       }}
     >
-      <span style={{ fontSize: 14, fontWeight: 500 }}>{name}</span>
-      <span style={{ fontFamily: fonts.mono, fontSize: 11, opacity: 0.55 }}>문서 {documentCount}개</span>
+      ×
     </button>
   );
 }

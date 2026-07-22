@@ -38,6 +38,7 @@ interface AppStateValue {
   spaces: Space[];
   activeSpaceId: string | null;
   selectSpace: (spaceId: string) => void;
+  deleteSpace: (spaceId: string) => Promise<void>;
 
   hasVisitedLanding: boolean;
   viewExistingSpaces: () => void;
@@ -201,6 +202,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
     [loadSpaceContent],
   );
+
+  const deleteSpace = useCallback(async (spaceId: string) => {
+    await spacesApi.deleteSpace(spaceId);
+    setSpaces((prev) => prev.filter((s) => s.space_id !== spaceId));
+    setSpaceData((prev) => {
+      const next = { ...prev };
+      delete next[spaceId];
+      return next;
+    });
+    setActiveSpaceId((prev) => {
+      if (prev !== spaceId) return prev;
+      setActiveTab('upload');
+      setActiveReviewDocId(null);
+      return null;
+    });
+  }, []);
 
   const openCreateSpaceModal = useCallback(() => {
     setCreateSpaceStep('form');
@@ -438,6 +455,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       spaces,
       activeSpaceId,
       selectSpace,
+      deleteSpace,
       hasVisitedLanding,
       viewExistingSpaces,
       sidebarCollapsed,
@@ -480,6 +498,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       spaces,
       activeSpaceId,
       selectSpace,
+      deleteSpace,
       hasVisitedLanding,
       viewExistingSpaces,
       sidebarCollapsed,
