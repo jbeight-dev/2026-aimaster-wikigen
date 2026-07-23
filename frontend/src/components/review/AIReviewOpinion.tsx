@@ -3,19 +3,34 @@ import type { VerificationReport } from '../../api/types';
 import { fonts, shadows, surface } from '../../theme/tokens';
 import { useHover } from '../../utils/useHover';
 
-const SCORE_LEGEND: { score: string; label: string }[] = [
-  { score: '1.00', label: '문제 없음' },
-  { score: '0.95', label: '사소한 이슈 존재' },
-  { score: '0.80', label: '일부 검토 필요' },
-  { score: '0.60', label: '중요한 누락 존재' },
-  { score: '0.30', label: '재생성 권장' },
+const REVIEW_LEGEND: { icon: string; label: string; description: string }[] = [
+  { icon: '🟢', label: '승인 권장(Approve)', description: '검토 결과 이상 없음 → 승인' },
+  { icon: '🟡', label: '검토 권장(Review)', description: '경미한 이슈 발견 → 검토 후 승인' },
+  { icon: '🔴', label: '재생성 필요(Revise)', description: '중요 이슈 발견 → 수정/재생성 후 재검토' },
 ];
 
-const VERDICT_STYLE: Record<VerificationReport['verdict'], { label: string; background: string; color: string }> = {
+const VERDICT_STYLE: Record<
+  NonNullable<VerificationReport['verdict']>,
+  { label: string; background: string; color: string }
+> = {
   pass: { label: '통과', background: 'rgba(255,138,61,0.14)', color: 'var(--accent-text)' },
   review: { label: '확인 필요', background: 'rgba(178,90,62,0.16)', color: '#E08A6C' },
   regenerate: { label: '재생성 필요', background: 'rgba(178,90,62,0.22)', color: '#E08A6C' },
 };
+
+const RECOMMENDATION_STYLE: Record<string, { label: string; background: string; color: string }> = {
+  approve: { label: '승인 권장', background: 'rgba(255,138,61,0.14)', color: 'var(--accent-text)' },
+};
+
+function recommendationStyle(recommendation: string) {
+  return (
+    RECOMMENDATION_STYLE[recommendation] ?? {
+      label: recommendation,
+      background: 'rgba(var(--ink-rgb), 0.08)',
+      color: 'var(--text)',
+    }
+  );
+}
 
 const SEVERITY_LABEL: Record<'low' | 'med' | 'high', string> = {
   low: '낮음',
@@ -65,22 +80,45 @@ export function AIReviewOpinion({
 
       {!isLoading && !error && report && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span
-              style={{
-                fontSize: 11.5,
-                padding: '3px 10px',
-                borderRadius: 999,
-                background: VERDICT_STYLE[report.verdict].background,
-                color: VERDICT_STYLE[report.verdict].color,
-              }}
-            >
-              {VERDICT_STYLE[report.verdict].label}
-            </span>
-            <span style={{ fontSize: 12, opacity: 0.6, fontFamily: fonts.mono }}>
-              score {report.score.toFixed(2)}
-            </span>
-          </div>
+          {(report.verdict || report.recommendation) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {report.verdict && (
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    padding: '3px 10px',
+                    borderRadius: 999,
+                    background: VERDICT_STYLE[report.verdict].background,
+                    color: VERDICT_STYLE[report.verdict].color,
+                  }}
+                >
+                  {VERDICT_STYLE[report.verdict].label}
+                </span>
+              )}
+              {!report.verdict && report.recommendation && (
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    padding: '3px 10px',
+                    borderRadius: 999,
+                    background: recommendationStyle(report.recommendation).background,
+                    color: recommendationStyle(report.recommendation).color,
+                  }}
+                >
+                  {recommendationStyle(report.recommendation).label}
+                </span>
+              )}
+              {typeof report.score === 'number' && (
+                <span style={{ fontSize: 12, opacity: 0.6, fontFamily: fonts.mono }}>
+                  score {report.score.toFixed(2)}
+                </span>
+              )}
+            </div>
+          )}
+
+          {report.review_comment && (
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}>{report.review_comment}</p>
+          )}
 
           {report.faithfulness.length > 0 && (
             <ReportSection title="근거 검증">
@@ -186,10 +224,12 @@ function ScoreLegendHint() {
             zIndex: 10,
           }}
         >
-          {SCORE_LEGEND.map(({ score, label }) => (
-            <div key={score} style={{ display: 'flex', gap: 10, padding: '2px 0' }}>
-              <span style={{ fontFamily: fonts.mono, opacity: 0.7, minWidth: 34 }}>{score}</span>
-              <span>{label}</span>
+          {REVIEW_LEGEND.map(({ icon, label, description }) => (
+            <div key={label} style={{ display: 'flex', gap: 8, padding: '2px 0' }}>
+              <span>{icon}</span>
+              <span>
+                <strong>{label}</strong>: {description}
+              </span>
             </div>
           ))}
         </div>

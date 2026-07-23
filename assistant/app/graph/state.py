@@ -39,6 +39,7 @@ class AssistantState(TypedDict, total=False):
     doc_headings: dict[str, str]  # wiki_doc_id -> 최상위 랭크 chunk의 heading
 
     retry_count: int
+    step_count: int  # 콘솔 로그용 STEP 번호 누적 (nodes.py의 _step 데코레이터가 관리)
     similarity_score: float
     context_precision: float
     context_recall: float

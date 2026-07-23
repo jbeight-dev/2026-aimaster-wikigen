@@ -51,7 +51,7 @@ async def _call_builder_approve(wiki_doc_id: str) -> None:
 
 
 async def _call_builder_verify(wiki_doc_id: str) -> dict:
-    url = f"{BUILDER_API_BASE_URL}/builderapi/v1/documents/{wiki_doc_id}/verify"
+    url = f"{BUILDER_API_BASE_URL}/builderapi/v1/documents/{wiki_doc_id}/verify_agent"
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url)

@@ -81,7 +81,7 @@ export function SpaceMain() {
             textDecoration: 'underline',
           }}
         >
-          전체 초기화 (데모)
+        s
         </button>
       </div>
     </main>

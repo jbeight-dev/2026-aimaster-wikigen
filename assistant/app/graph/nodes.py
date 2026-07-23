@@ -1,10 +1,11 @@
+import functools
 import logging
 import re
 import time
 
 from sqlalchemy.orm import Session
 
-from .. import config, observability
+from .. import config
 from ..clients import llm, vectordb
 from ..errors import AppError
 from ..models import WikiMd
@@ -15,6 +16,50 @@ logger = logging.getLogger("assistant.nodes")
 NO_CONTEXT_TEXT = "질문에 관련된 문서를 찾지 못했어요."
 
 _TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
+
+
+_EMPHASIS_BANNER = "*" * 5
+
+
+def _step(name: str, emphasize: bool = False):
+    """그래프 노드를 감싸 STEP N 시작/완료 로그를 남긴다 (콘솔에서 파이프라인 진행을 추적하기 위함).
+
+    LangGraph는 노드마다 내부 ThreadPoolExecutor로 실행 컨텍스트를 복사해서 넘기므로
+    contextvars 기반 카운터는 노드마다 독립된 복사본을 봐서 항상 초기값(0)에서 시작한다.
+    그래서 스텝 번호는 contextvar가 아니라 그래프 state(step_count)에 실어 다음 노드로 전달한다.
+
+    emphasize=True인 노드는 시작/완료 로그를 배너로 감싸 콘솔에서 눈에 띄게 만든다.
+    """
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(state: AssistantState) -> dict:
+            step = state.get("step_count", 0) + 1
+            request_id = state.get("request_id")
+            if emphasize:
+                logger.info(
+                    "[%s] %s STEP %d %s 시작 %s",
+                    request_id, _EMPHASIS_BANNER, step, name, _EMPHASIS_BANNER,
+                )
+            else:
+                logger.info("[%s] STEP %d %s 시작", request_id, step, name)
+            start = time.perf_counter()
+            try:
+                result = fn(state)
+            finally:
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                if emphasize:
+                    logger.info(
+                        "[%s] %s STEP %d %s 완료 (%.1fms) %s",
+                        request_id, _EMPHASIS_BANNER, step, name, elapsed_ms, _EMPHASIS_BANNER,
+                    )
+                else:
+                    logger.info("[%s] STEP %d %s 완료 (%.1fms)", request_id, step, name, elapsed_ms)
+            return {**result, "step_count": step}
+
+        return wrapped
+
+    return decorator
 
 
 def _tokenize(text: str) -> list[str]:
@@ -37,6 +82,7 @@ def _match_ratio(query_tokens: list[str], target_tokens: list[str]) -> float:
     return matched / len(query_tokens)
 
 
+@_step("analyze_question")
 def analyze_question(state: AssistantState) -> dict:
     """Question Analyzer: 공백 정리 + 멀티턴 History 반영해 독립적인 검색 질문을 만든다."""
     question = " ".join(state["question"].split())
@@ -56,6 +102,7 @@ def analyze_question(state: AssistantState) -> dict:
     return {"question": search_question}
 
 
+@_step("optimize_query")
 def optimize_query(state: AssistantState) -> dict:
     """Query Optimizer: 제품명/기능명/기술 용어를 명확히 해 검색 질의를 최적화한다."""
     try:
@@ -70,6 +117,7 @@ def optimize_query(state: AssistantState) -> dict:
     return {"question": optimized}
 
 
+@_step("retrieve_summary", emphasize=True)
 def retrieve_summary(state: AssistantState) -> dict:
     try:
         embedding = llm.embed_text(state["question"])
@@ -92,6 +140,7 @@ def retrieve_summary(state: AssistantState) -> dict:
     return {"question_embedding": embedding, "summary_hits": hits}
 
 
+@_step("retrieve_chunk", emphasize=True)
 def retrieve_chunk(state: AssistantState) -> dict:
     start = time.perf_counter()
     try:
@@ -122,10 +171,18 @@ def route_after_hits(state: AssistantState) -> str:
         for h in state.get("summary_hits", []) + state.get("chunk_hits", [])
     ]
     if best and max(best) >= config.MIN_SCORE:
-        return "rerank_chunks"
-    return _retry_or_give_up(state)
+        decision = "rerank_chunks"
+    else:
+        decision = _retry_or_give_up(state)
+
+    logger.info(
+        "[%s] ROUTE retrieve_chunk -> %s (best_score=%.4f) space_id=%s",
+        state.get("request_id"), decision, max(best, default=0.0), state["space_id"],
+    )
+    return decision
 
 
+@_step("rerank_chunks")
 def rerank_chunks(state: AssistantState) -> dict:
     """Chunk Reranker: Semantic Similarity + Heading/Keyword/Metadata Match로 재정렬."""
     chunk_hits = state.get("chunk_hits", [])
@@ -168,10 +225,18 @@ def rerank_chunks(state: AssistantState) -> dict:
 def route_after_confidence(state: AssistantState) -> str:
     """2차(심층) 필터: RAGAS 스타일 confidence_score 기준으로 답변/재시도/포기를 결정."""
     if state.get("confidence_score", 0.0) >= config.CONFIDENCE_THRESHOLD:
-        return "generate_answer"
-    return _retry_or_give_up(state)
+        decision = "generate_answer"
+    else:
+        decision = _retry_or_give_up(state)
+
+    logger.info(
+        "[%s] ROUTE confidence_checker -> %s (confidence_score=%.2f) space_id=%s",
+        state.get("request_id"), decision, state.get("confidence_score", 0.0), state["space_id"],
+    )
+    return decision
 
 
+@_step("no_context_answer")
 def no_context_answer(state: AssistantState) -> dict:
     return {
         "answer": NO_CONTEXT_TEXT,
@@ -182,6 +247,7 @@ def no_context_answer(state: AssistantState) -> dict:
 
 
 def make_build_context(db: Session):
+    @_step("build_context")
     def build_context(state: AssistantState) -> dict:
         reranked = state.get("reranked_chunks", [])
 
@@ -232,6 +298,7 @@ def make_build_context(db: Session):
     return build_context
 
 
+@_step("confidence_checker")
 def confidence_checker(state: AssistantState) -> dict:
     doc_scores = state.get("doc_scores", {})
     similarity_score = max(0.0, min(1.0, max(doc_scores.values(), default=0.0)))
@@ -270,6 +337,7 @@ def confidence_checker(state: AssistantState) -> dict:
     }
 
 
+@_step("query_rewriter")
 def query_rewriter(state: AssistantState) -> dict:
     try:
         rewritten = llm.rewrite_query(state["original_question"], state["question"])
@@ -284,6 +352,7 @@ def query_rewriter(state: AssistantState) -> dict:
     return {"question": rewritten, "retry_count": retry_count}
 
 
+@_step("generate_answer")
 def generate_answer_node(state: AssistantState) -> dict:
     history = state.get("history", [])
     recent_turns = config.RECENT_HISTORY_TURNS
@@ -305,6 +374,7 @@ def generate_answer_node(state: AssistantState) -> dict:
     return {"answer": answer}
 
 
+@_step("extract_sources")
 def extract_sources(state: AssistantState) -> dict:
     logger.info(
         "answer generated sources=%d request_id=%s space_id=%s",

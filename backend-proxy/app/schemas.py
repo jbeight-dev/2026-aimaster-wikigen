@@ -182,9 +182,11 @@ class VerifyRelationSuggestion(BaseModel):
 
 class VerificationReport(BaseModel):
     doc_id: str
-    verdict: str
-    score: float
-    attempt: int
+    verdict: Optional[str] = None
+    score: Optional[float] = None
+    attempt: Optional[int] = None
+    recommendation: Optional[str] = None
+    review_comment: Optional[str] = None
     faithfulness: list[VerifyFinding] = []
     completeness: list[str] = []
     value_changes: list[VerifyValueChange] = []

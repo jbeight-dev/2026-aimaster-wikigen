@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as documentsApi from '../../api/documents';
 import { ApiError } from '../../api/client';
 import type { DocumentSection, VerificationReport, WikiDocument } from '../../api/types';
@@ -33,11 +33,13 @@ export function ReviewScreen() {
   const [verifyReport, setVerifyReport] = useState<VerificationReport | null>(null);
   const [isVerifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setIsEditing(false);
     setRejecting(false);
     setReason('');
+    mainRef.current?.scrollTo({ top: 0 });
   }, [activeReviewDocument?.document_id]);
 
   useEffect(() => {
@@ -136,6 +138,7 @@ export function ReviewScreen() {
 
   return (
     <main
+      ref={mainRef}
       style={{
         flex: 1,
         display: 'flex',

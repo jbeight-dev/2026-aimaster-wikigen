@@ -104,9 +104,11 @@ export interface VerifyRelationSuggestion {
 
 export interface VerificationReport {
   doc_id: string;
-  verdict: 'pass' | 'regenerate' | 'review';
-  score: number;
-  attempt: number;
+  verdict?: 'pass' | 'regenerate' | 'review';
+  score?: number;
+  attempt?: number;
+  recommendation?: string;
+  review_comment?: string;
   faithfulness: VerifyFinding[];
   completeness: string[];
   value_changes: VerifyValueChange[];
